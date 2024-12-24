@@ -47,7 +47,7 @@ let updateArrived (ctx: UpdateContext) =
 [<EntryPoint>]
 let main _ =
   async {
-    let config = Config.defaultConfig |> Config.withReadTokenFromFile
+    let config = Config.defaultConfig |> Config.withReadTokenFromEnv "TELEGRAM_BOT_TOKEN"
     let! _ = Api.deleteWebhookBase () |> api config
     return! startBot config updateArrived None
   } |> Async.RunSynchronously
