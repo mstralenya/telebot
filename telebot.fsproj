@@ -17,7 +17,6 @@
     
   <ItemGroup>
     <Content Include=".dockerignore" />
-    <Content Include=".env" />
     <Content Include=".gitignore" />
     <Content Include="Dockerfile" />
     <Content Include="replacements" />
