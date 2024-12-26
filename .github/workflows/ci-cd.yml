@@ -37,6 +37,7 @@ jobs:
           host: ${{ secrets.DROPLET_IP }}
           username: ${{ secrets.DROPLET_USER }}
           key: ${{ secrets.DROPLET_SSH_KEY }}
+          debug: true
           script: |
             docker pull ghcr.io/${{ github.repository_owner }}/telebot:main
             docker stop telebot || true
