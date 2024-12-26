@@ -18,4 +18,4 @@ RUN dotnet publish "telebot.fsproj" -c $BUILD_CONFIGURATION -o /app/publish /p:U
 FROM base AS final
 WORKDIR /app
 COPY --from=publish /app/publish .
-ENTRYPOINT ["dotnet", "telebot.dll"]
+ENTRYPOINT ["dotnet", "Telebot.dll"]
