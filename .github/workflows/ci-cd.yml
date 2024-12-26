@@ -42,4 +42,4 @@ jobs:
             docker pull ghcr.io/${{ github.repository_owner }}/telebot:master
             docker stop telebot || true
             docker rm telebot || true
-            docker run -d -e TELEGRAM_BOT_TOKEN="${{ secrets.TELEGRAM_BOT_TOKEN }}" --name telebot ghcr.io/${{ github.repository_owner }}/telebot:master
+            docker run -d -e TELEGRAM_BOT_TOKEN='${{ secrets.TELEGRAM_BOT_TOKEN }}' --name telebot ghcr.io/${{ github.repository_owner }}/telebot:master
