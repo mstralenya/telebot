@@ -6,8 +6,12 @@ name: Docker
 # documentation.
 
 on:
+  schedule:
+    - cron: '0 * * * *'
   push:
     branches: [ "master" ]
+    # Publish semver tags as releases.
+    tags: [ 'v*.*.*' ]
   pull_request:
     branches: [ "master" ]
 
@@ -92,3 +96,16 @@ jobs:
         # This step uses the identity token to provision an ephemeral certificate
         # against the sigstore community Fulcio instance.
         run: echo "${TAGS}" | xargs -I {} cosign sign --yes {}@${DIGEST}
+
+      - name: SSH into DigitalOcean Droplet and deploy
+        uses: appleboy/ssh-action@v0.1.4
+        with:
+          host: ${{ secrets.DROPLET_IP }}
+          username: ${{ secrets.DROPLET_USER }}
+          key: ${{ secrets.DROPLET_SSH_KEY }}
+          debug: true
+          script: |
+            docker pull ghcr.io/${{ github.repository_owner }}/telebot:master
+            docker stop telebot || true
+            docker rm telebot || true
+            docker run -d -e TELEGRAM_BOT_TOKEN='${{ secrets.TELEGRAM_BOT_TOKEN }}' --name telebot ghcr.io/${{ github.repository_owner }}/telebot:master
