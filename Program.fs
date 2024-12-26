@@ -61,10 +61,12 @@ let updateArrived (ctx: UpdateContext) =
             match video with
             | Some loadedVideoFile ->
                 let file = InputFile.File(loadedVideoFile, new FileStream(loadedVideoFile, FileMode.Open, FileAccess.Read))
+
                 Req.SendVideo.Make(chatId=chat.Id, video=file, replyParameters=ReplyParameters.Create(messageId, ChatId.Int(chat.Id)))
                 |> api ctx.Config
                 |> Async.Ignore
                 |> Async.RunSynchronously
+
                 deleteVideo loadedVideoFile
             | None -> ()
         )
@@ -78,7 +80,7 @@ let updateArrived (ctx: UpdateContext) =
 [<EntryPoint>]
 let main _ =
   async {
-    let config = Config.defaultConfig |> Config.withReadTokenFromEnv "TELEGRAM_BOT_TOKEN"
+    let config = Config.defaultConfig |> Config.withReadTokenFromFile
     let! _ = Api.deleteWebhookBase () |> api config
     return! startBot config updateArrived None
   } |> Async.RunSynchronously
