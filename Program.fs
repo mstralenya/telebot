@@ -73,7 +73,7 @@ let processTikTokVideos (messageText: string option, messageId: MessageId, chatI
     processVideos getTikTokLinkIds (fun link -> processTikTokVideo (Some link)) (messageText, messageId, chatId, ctx)
 
 let processInstagramLinks (messageText: string option, messageId: MessageId, chatId: ChatId, ctx: UpdateContext) =
-    processVideos getInstagramLinks (fun link -> processInstagramVideo link |> Async.RunSynchronously) (messageText, messageId, chatId, ctx)
+    processVideos getInstagramLinks (fun link -> processInstagramVideoAsync link |> Async.RunSynchronously) (messageText, messageId, chatId, ctx)
 
 let processReplacements (messageText: string option, messageId: MessageId, chatId: ChatId, ctx: UpdateContext) =
     applyReplacements messageText |> List.iter (fun text -> reply(Message text, messageId, chatId, ctx))

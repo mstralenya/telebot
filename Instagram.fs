@@ -23,27 +23,20 @@ type InstagramMediaResponse = {
     Data: Data option
 }
 
+let private regex = @"(?:https?:\/\/(?:www\.)?instagram\.com\/(?:reels?|p)\/)([\w-]+)"
+
 let private extractReelId (url: string) =
-    let regex = Regex(@"(?:https?:\/\/(?:www\.)?instagram\.com\/(?:reels?|p)\/)([\w-]+)")
-    let m = regex.Match(url)
-    if m.Success then
-        Some m.Groups.[1].Value
-    else
-        None
-        
+    let m = Regex.Match(url, regex)
+    if m.Success then Some m.Groups.[1].Value else None
+
 let getInstagramLinks (input: string option) =
-    match input with
-    | Some text ->
-        let matches = Regex.Matches(text, "(?:https?:\/\/(?:www\.)?instagram\.com\/(?:reels?|p)\/)([\w-]+)")
-        if matches.Count > 0 then
-            let matched = matches
-                          |> Seq.cast<Match>
-                          |> Seq.toList
-                          |> List.map (_.Value)
-            matched
-        else
-            List.Empty
-    | None -> List.Empty
+    input
+    |> Option.map (fun text ->
+        Regex.Matches(text, regex)
+        |> Seq.cast<Match>
+        |> Seq.map (_.Value)
+        |> Seq.toList)
+    |> Option.defaultValue List.Empty
 
 let headers = 
     dict [
@@ -90,22 +83,15 @@ let getContentPostId postId =
     KeyValuePair("variables", $"{{\"shortcode\":\"{postId}\",\"fetch_comment_count\":null,\"fetch_related_profile_media_count\":null,\"parent_comment_count\":null,\"child_comment_count\":null,\"fetch_like_count\":null,\"fetch_tagged_user_count\":null,\"fetch_preview_comment_count\":null,\"has_threaded_comments\":false,\"hoisted_comment_id\":null,\"hoisted_reply_id\":null}}")
 
 let getMediaIdRequest (reelsId: string) =
-        let nameValues = 
-            urlContent
-            |> List.append [getContentPostId reelsId]
-            
-        let encodedData = new FormUrlEncodedContent(nameValues)
-        let requestMessage = new HttpRequestMessage(
-            Method = HttpMethod.Post,
-            RequestUri = Uri("https://www.instagram.com/api/graphql"),
-            Content = encodedData)
-            
-        headers
-        |> Seq.iter (fun kvp -> requestMessage.Headers.Add(kvp.Key, kvp.Value))
-        
-        requestMessage
+    let nameValues = urlContent |> List.append [getContentPostId reelsId]
+    let encodedData = new FormUrlEncodedContent(nameValues)
+    let requestMessage = new HttpRequestMessage(HttpMethod.Post, Uri("https://www.instagram.com/api/graphql"))
+    requestMessage.Content <- encodedData
+    headers |> Seq.iter (fun kvp -> requestMessage.Headers.TryAddWithoutValidation(kvp.Key, kvp.Value) |> ignore)
+    
+    requestMessage
 
-let processInstagramVideo (url: string) =
+let processInstagramVideoAsync (url: string) =
     async {
         let reelId = extractReelId url
 
