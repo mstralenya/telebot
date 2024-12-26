@@ -23,6 +23,10 @@ let readReplacements (filePath: string) =
         parts[0], parts[1])
     |> Map.ofArray
 
+type Reply =
+    | VideoFile of string
+    | Message of string
+
 let replacements: Map<string, string> = readReplacements replacementsFile
 
 let applyReplacements (input: string option) =
@@ -40,40 +44,39 @@ let applyReplacements (input: string option) =
             else
                 acc) []
     | None -> List.Empty
-    
-let replyWithVideo (videoFile: string, messageId: MessageId, chatId: ChatId, ctx: UpdateContext) =
-    let file = InputFile.File(videoFile, new FileStream(videoFile, FileMode.Open, FileAccess.Read))
-    Req.SendVideo.Make(chatId=chatId, video=file, replyParameters=ReplyParameters.Create(messageId.MessageId, chatId))
-    |> api ctx.Config
-    |> Async.Ignore
-    |> Async.RunSynchronously
-    deleteVideo videoFile    
 
-let processTikTokVideos (messageText: string option, messageId: MessageId, chatId: ChatId, ctx: UpdateContext) =
-    let tikTokLinks = getTikTokLinkIds messageText
-    tikTokLinks |> List.iter (fun link ->
-            let video = processTikTokVideo (Some link) 
-            match video with
-            | Some loadedVideoFile -> replyWithVideo(loadedVideoFile, messageId, chatId, ctx)
-            | None -> ()
-        )
-
-let processInstagramLinks (messageText: string option, messageId: MessageId, chatId: ChatId, ctx: UpdateContext) =
-    let instagramLinks = getInstagramLinks messageText
-    instagramLinks |> List.iter (fun link ->
-            let video = processInstagramVideo link |> Async.RunSynchronously
-            match video with
-            | Some loadedVideoFile -> replyWithVideo(loadedVideoFile, messageId, chatId, ctx)
-            | None -> ()
-        )
-
-let processReplacements (messageText: string option, messageId: MessageId, chatId: ChatId, ctx: UpdateContext) =
-    let replacementList = applyReplacements messageText
-    replacementList |> List.iter (fun link ->
-        Req.SendMessage.Make(chatId, link, replyParameters=ReplyParameters.Create(messageId.MessageId, chatId))
+let reply (reply: Reply, messageId: MessageId, chatId: ChatId, ctx: UpdateContext) =
+    match reply with
+    | VideoFile videoFile ->
+        let file = InputFile.File(videoFile, new FileStream(videoFile, FileMode.Open, FileAccess.Read))
+        Req.SendVideo.Make(chatId=chatId, video=file, replyParameters=ReplyParameters.Create(messageId.MessageId, chatId))
         |> api ctx.Config
         |> Async.Ignore
-        |> Async.Start)
+        |> Async.RunSynchronously
+        deleteVideo videoFile
+    | Message message ->
+        Req.SendMessage.Make(chatId, message, replyParameters=ReplyParameters.Create(messageId.MessageId, chatId))
+        |> api ctx.Config
+        |> Async.Ignore
+        |> Async.Start
+
+let processVideos getLinks processVideo (messageText: string option, messageId: MessageId, chatId: ChatId, ctx: UpdateContext) =
+    let links = getLinks messageText
+    links |> List.iter (fun link ->
+        let video = processVideo link
+        match video with
+        | Some loadedVideoFile -> reply(VideoFile loadedVideoFile, messageId, chatId, ctx)
+        | None -> ()
+    )
+
+let processTikTokVideos (messageText: string option, messageId: MessageId, chatId: ChatId, ctx: UpdateContext) =
+    processVideos getTikTokLinkIds (fun link -> processTikTokVideo (Some link)) (messageText, messageId, chatId, ctx)
+
+let processInstagramLinks (messageText: string option, messageId: MessageId, chatId: ChatId, ctx: UpdateContext) =
+    processVideos getInstagramLinks (fun link -> processInstagramVideo link |> Async.RunSynchronously) (messageText, messageId, chatId, ctx)
+
+let processReplacements (messageText: string option, messageId: MessageId, chatId: ChatId, ctx: UpdateContext) =
+    applyReplacements messageText |> List.iter (fun text -> reply(Message text, messageId, chatId, ctx))
 
 let updateArrived (ctx: UpdateContext) =
   match ctx.Update.Message with
