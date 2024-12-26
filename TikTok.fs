@@ -66,7 +66,7 @@ let processTikTokVideo (url: string option) : option<string> =
         match getVideoUrl result with
         | Some url ->
             printfn $"Video URL: %s{url}"
-            let fileName = $"{Guid.NewGuid}.mp4"
+            let fileName = $"tt_{id}_{Guid.NewGuid()}.mp4"
             downloadVideoAsync url fileName |> Async.RunSynchronously
             printfn $"Video downloaded to %s{fileName}"
             Some fileName

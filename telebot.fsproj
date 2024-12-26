@@ -8,10 +8,14 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <Compile Include="Text.fs" />
     <Compile Include="VideoDownloader.fs" />
     <Compile Include="Instagram.fs" />
     <Compile Include="TikTok.fs" />
     <Compile Include="Program.fs" />
+  </ItemGroup>
+    
+  <ItemGroup>
     <Content Include=".dockerignore" />
     <Content Include=".env" />
     <Content Include=".gitignore" />

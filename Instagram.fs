@@ -97,7 +97,7 @@ let processInstagramVideoAsync (url: string) =
 
         match reelId with
         | Some rId -> 
-            let fileName = $"{Guid.NewGuid}.mp4"
+            let fileName = $"tt_{rId}_{Guid.NewGuid()}.mp4"
             use mediaIdRequest = getMediaIdRequest rId
             use client = new HttpClient()
             let! mediaIdResponse = client.SendAsync mediaIdRequest |> Async.AwaitTask
