@@ -39,8 +39,7 @@ jobs:
           key: ${{ secrets.DROPLET_SSH_KEY }}
           debug: true
           script: |
-            docker pull ghcr.io/${{ github.repository_owner }}/telebot:main
+            docker pull ghcr.io/${{ github.repository_owner }}/telebot:master
             docker stop telebot || true
             docker rm telebot || true
-            docker run -d -e TELEGRAM_BOT_TOKEN='{{ secrets.TELEGRAM_BOT_TOKEN }}' --name telebot ghcr.io/${{ github.repository_owner }}/telebot:main
-            docker image prune -f
+            docker run -d -e TELEGRAM_BOT_TOKEN="${{ secrets.TELEGRAM_BOT_TOKEN }}" --name telebot ghcr.io/${{ github.repository_owner }}/telebot:master
