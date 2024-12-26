@@ -1,6 +1,7 @@
 ﻿module Telebot.TikTok
 
-open System.IO
+open System
+open Telebot.VideoDownloader
 open System.Net.Http
 open System.Text.RegularExpressions
 open Newtonsoft.Json.Linq
@@ -26,15 +27,6 @@ let private getVideoUrl (json: string) =
     with
     | _ -> None
 
-let private downloadVideoAsync (url: string) (filePath: string) =
-    async {
-        use client = new HttpClient()
-        let! response = client.GetAsync(url) |> Async.AwaitTask
-        response.EnsureSuccessStatusCode() |> ignore
-        let! content = response.Content.ReadAsByteArrayAsync() |> Async.AwaitTask
-        File.WriteAllBytes(filePath, content)
-    }
-
 let private fetchWithHeadersAsync (url: string option) =
     async {
         match url with
@@ -51,7 +43,21 @@ let private fetchWithHeadersAsync (url: string option) =
                 return None
         | None -> return None
     }
-    
+
+let getTikTokLinkIds (input: string option) =
+    match input with
+    | Some text ->
+        let matches = Regex.Matches(text, "http(s)?://(www\.)?(vm.)tiktok.com/(.*)")
+        if matches.Count > 0 then
+            let matched = matches
+                          |> Seq.cast<Match>
+                          |> Seq.toList
+                          |> List.map (_.Value)
+            matched
+        else
+            List.Empty
+    | None -> List.Empty
+
 let processTikTokVideo (url: string option) : option<string> =
     let videoId = fetchWithHeadersAsync(url) |> Async.RunSynchronously
     match videoId with
@@ -60,18 +66,13 @@ let processTikTokVideo (url: string option) : option<string> =
         match getVideoUrl result with
         | Some url ->
             printfn $"Video URL: %s{url}"
-            let filePath = $"{id}.mp4"
-            downloadVideoAsync url filePath |> Async.RunSynchronously
-            printfn $"Video downloaded to %s{filePath}"
-            Some filePath
+            let fileName = $"{Guid.NewGuid}.mp4"
+            downloadVideoAsync url fileName |> Async.RunSynchronously
+            printfn $"Video downloaded to %s{fileName}"
+            Some fileName
         | None ->
             printfn "Video URL not found"
             None
     | None ->
         printfn "Video ID not found"
         None
-    
-let deleteVideo (id: string) =
-    let filePath = $"{id}.mp4"
-    if File.Exists(filePath) then
-        File.Delete(filePath)

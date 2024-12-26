@@ -6,7 +6,12 @@ open Funogram.Api
 open Funogram.Telegram
 open Funogram.Telegram.Bot
 open Funogram.Telegram.Types
+open dotenv.net
+open Telebot.VideoDownloader
 open Telebot.TikTok
+open Telebot.Instagram
+
+DotEnv.Load()
 
 [<Literal>]
 let replacementsFile = "replacements"
@@ -19,20 +24,6 @@ let readReplacements (filePath: string) =
     |> Map.ofArray
 
 let replacements: Map<string, string> = readReplacements replacementsFile
-
-let getTikTokLinkIds (input: string option) =
-    match input with
-    | Some text ->
-        let matches = Regex.Matches(text, "http(s)?://(www\.)?(vm.)tiktok.com/(.*)")
-        if matches.Count > 0 then
-            let matched = matches
-                          |> Seq.cast<Match>
-                          |> Seq.toList
-                          |> List.map (_.Value)
-            matched
-        else
-            List.Empty
-    | None -> List.Empty
 
 let applyReplacements (input: string option) =
     match input with
@@ -49,30 +40,49 @@ let applyReplacements (input: string option) =
             else
                 acc) []
     | None -> List.Empty
+    
+let replyWithVideo (videoFile: string, messageId: MessageId, chatId: ChatId, ctx: UpdateContext) =
+    let file = InputFile.File(videoFile, new FileStream(videoFile, FileMode.Open, FileAccess.Read))
+    Req.SendVideo.Make(chatId=chatId, video=file, replyParameters=ReplyParameters.Create(messageId.MessageId, chatId))
+    |> api ctx.Config
+    |> Async.Ignore
+    |> Async.RunSynchronously
+    deleteVideo videoFile    
+
+let processTikTokVideos (messageText: string option, messageId: MessageId, chatId: ChatId, ctx: UpdateContext) =
+    let tikTokLinks = getTikTokLinkIds messageText
+    tikTokLinks |> List.iter (fun link ->
+            let video = processTikTokVideo (Some link) 
+            match video with
+            | Some loadedVideoFile -> replyWithVideo(loadedVideoFile, messageId, chatId, ctx)
+            | None -> ()
+        )
+
+let processInstagramLinks (messageText: string option, messageId: MessageId, chatId: ChatId, ctx: UpdateContext) =
+    let instagramLinks = getInstagramLinks messageText
+    instagramLinks |> List.iter (fun link ->
+            let video = processInstagramVideo link |> Async.RunSynchronously
+            match video with
+            | Some loadedVideoFile -> replyWithVideo(loadedVideoFile, messageId, chatId, ctx)
+            | None -> ()
+        )
+
+let processReplacements (messageText: string option, messageId: MessageId, chatId: ChatId, ctx: UpdateContext) =
+    let replacementList = applyReplacements messageText
+    replacementList |> List.iter (fun link ->
+        Req.SendMessage.Make(chatId, link, replyParameters=ReplyParameters.Create(messageId.MessageId, chatId))
+        |> api ctx.Config
+        |> Async.Ignore
+        |> Async.Start)
 
 let updateArrived (ctx: UpdateContext) =
   match ctx.Update.Message with
   | Some { MessageId = messageId; Chat = chat; Text = messageText } ->
-    let replacementList = applyReplacements messageText
-    let tikTokLinks = getTikTokLinkIds messageText
-    
-    tikTokLinks |> List.iter (fun link ->
-            let video = processTikTokVideo (Some link)
-            match video with
-            | Some loadedVideoFile ->
-                let file = InputFile.File(loadedVideoFile, new FileStream(loadedVideoFile, FileMode.Open, FileAccess.Read))
-                Req.SendVideo.Make(chatId=chat.Id, video=file, replyParameters=ReplyParameters.Create(messageId, ChatId.Int(chat.Id)))
-                |> api ctx.Config
-                |> Async.Ignore
-                |> Async.RunSynchronously
-                deleteVideo loadedVideoFile
-            | None -> ()
-        )
-    replacementList |> List.iter (fun link ->
-        Api.sendMessageReply chat.Id link messageId
-        |> api ctx.Config
-        |> Async.Ignore
-        |> Async.Start)
+    let mId = MessageId.Create(messageId)
+    let cId = ChatId.Int(chat.Id)
+    processTikTokVideos (messageText, mId, cId, ctx)
+    processInstagramLinks (messageText, mId, cId, ctx)
+    processReplacements (messageText, mId, cId, ctx)
   | _ -> ()
 
 [<EntryPoint>]

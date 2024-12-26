@@ -1,3 +1,2 @@
 ﻿http(s)?://(www\.)?twitter.com(/.*)?=https://fixupx.com$3
 http(s)?://(www\.)?x\.com(/.*)?=https://fixupx.com$3
-http(s)?://(www\.)?instagram.com(/.*)?=https://ddinstagram.com$3

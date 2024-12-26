@@ -4,18 +4,23 @@
     <OutputType>Exe</OutputType>
     <TargetFramework>net8.0</TargetFramework>
     <DockerDefaultTargetOS>Linux</DockerDefaultTargetOS>
+    <AssemblyName>Telebot</AssemblyName>
   </PropertyGroup>
 
   <ItemGroup>
+    <Compile Include="VideoDownloader.fs" />
+    <Compile Include="Instagram.fs" />
     <Compile Include="TikTok.fs" />
     <Compile Include="Program.fs" />
     <Content Include=".dockerignore" />
+    <Content Include=".env" />
     <Content Include=".gitignore" />
     <Content Include="Dockerfile" />
     <Content Include="replacements" />
   </ItemGroup>
 
   <ItemGroup>
+    <PackageReference Include="dotenv.net" Version="3.2.1" />
     <PackageReference Include="Funogram" Version="3.0.2" />
     <PackageReference Include="Funogram.Telegram" Version="7.10.0" />
     <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
