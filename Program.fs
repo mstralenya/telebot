@@ -61,7 +61,7 @@ let updateArrived (ctx: UpdateContext) =
             match video with
             | Some loadedVideoFile ->
                 let file = InputFile.File(loadedVideoFile, new FileStream(loadedVideoFile, FileMode.Open, FileAccess.Read))
-                Api.sendVideo chat.Id file ""
+                Req.SendVideo.Make(chatId=chat.Id, video=file, replyParameters=ReplyParameters.Create(messageId, ChatId.Int(chat.Id)))
                 |> api ctx.Config
                 |> Async.Ignore
                 |> Async.RunSynchronously
