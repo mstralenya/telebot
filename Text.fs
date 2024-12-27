@@ -1,36 +1,30 @@
 ﻿module Telebot.Text
 
-open System.IO;
+open System.IO
 open System.Text.RegularExpressions
 
 [<Literal>]
 let private replacementsFile = "replacements"
 
-let private readReplacements (filePath: string) =
+let private readReplacements filePath =
     File.ReadAllLines filePath
-    |> Array.map (fun line -> 
-        let parts = line.Split('=')
-        parts[0], parts[1])
+    |> Array.map (fun line -> let parts = line.Split('=') in parts[0], parts[1])
     |> Map.ofArray
 
 type Reply =
     | VideoFile of string
     | Message of string
 
-let private replacements: Map<string, string> = readReplacements replacementsFile
+let private replacements = readReplacements replacementsFile
 
-let applyReplacements (input: string option) =
-    match input with
-    | Some text ->
+let applyReplacements input =
+    input
+    |> Option.map (fun text ->
         replacements
         |> Map.fold (fun acc key value ->
-            let matches = Regex.Matches(text, key)
-            if matches.Count > 0 then
-                let matched = matches
-                              |> Seq.cast<Match>
-                              |> Seq.toList
-                              |> List.map (fun m -> Regex.Replace(m.Value, key, value))
-                matched @ acc
-            else
-                acc) []
-    | None -> List.Empty
+            Regex.Matches(text, key)
+            |> Seq.cast<Match>
+            |> Seq.map (fun m -> Regex.Replace(m.Value, key, value))
+            |> Seq.toList
+            |> List.append acc) [])
+    |> Option.defaultValue List.empty

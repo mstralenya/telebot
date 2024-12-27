@@ -8,6 +8,7 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <Compile Include="Policies.fs" />
     <Compile Include="Text.fs" />
     <Compile Include="VideoDownloader.fs" />
     <Compile Include="Instagram.fs" />
@@ -27,6 +28,7 @@
     <PackageReference Include="Funogram" Version="3.0.2" />
     <PackageReference Include="Funogram.Telegram" Version="7.10.0" />
     <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
+    <PackageReference Include="Polly" Version="8.5.0" />
   </ItemGroup>
   
   <ItemGroup>
