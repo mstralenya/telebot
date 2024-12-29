@@ -21,6 +21,9 @@
     <Content Include=".gitignore" />
     <Content Include="Dockerfile" />
     <Content Include="replacements" />
+    <Content Include="igHeaders.json" CopyToPublishDirectory="Always" CopyToOutputDirectory="Always"/>
+    <Content Include="igUrlContent.json" CopyToPublishDirectory="Always" CopyToOutputDirectory="Always"/>
+    <Content Include="replacements" CopyToPublishDirectory="Always" CopyToOutputDirectory="Always"/>
   </ItemGroup>
 
   <ItemGroup>
@@ -29,10 +32,6 @@
     <PackageReference Include="Funogram.Telegram" Version="7.10.0" />
     <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
     <PackageReference Include="Polly" Version="8.5.0" />
-  </ItemGroup>
-  
-  <ItemGroup>
-    <None Include="replacements" CopyToPublishDirectory="Always" CopyToOutputDirectory="Always" />
   </ItemGroup>
 
 </Project>
