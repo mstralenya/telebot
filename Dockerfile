@@ -16,6 +16,7 @@ ARG BUILD_CONFIGURATION=Release
 RUN dotnet publish "telebot.fsproj" -c $BUILD_CONFIGURATION -o /app/publish /p:UseAppHost=false
 
 FROM base AS final
+RUN apk update && apk add --no-cache ffmpeg
 WORKDIR /app
 COPY --from=publish /app/publish .
 ENTRYPOINT ["dotnet", "Telebot.dll"]
