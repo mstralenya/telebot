@@ -21,11 +21,12 @@ type VideoInfo = {
     Bitrate: int option
 }
 
+let private twitterRegex = @"https://(x|twitter).com/.*/status/(\d+)"
 
-let client = new HttpClient()
+let private client = new HttpClient()
 
 // Common headers
-let commonHeaders = [
+let private commonHeaders = [
     "User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/92.0.4515.107 Safari/537.36"
     "Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
     "Accept-Language", "en-us,en;q=0.5"
@@ -34,7 +35,7 @@ let commonHeaders = [
 ]
 
 // Helper function to set headers
-let setHeaders (headers: (string * string) list) (request: HttpRequestMessage) =
+let private setHeaders (headers: (string * string) list) (request: HttpRequestMessage) =
     headers |> List.iter (fun (key, value) -> request.Headers.Add(key, value))
     request
 
@@ -119,7 +120,7 @@ let private computeHash (input: string) =
 
 let getTwitterReply (url: string) =
     let guestToken = activateGuestToken()
-    let tweetId = Regex.Match(url, "https://(x|twitter).com/.*/status/(\d+)").Groups.[2].Value
+    let tweetId = Regex.Match(url, twitterRegex).Groups.[2].Value
     let tweetResult = getTweetResultByRestId guestToken tweetId
     let videoFile = getVideoFile tweetResult 
     match videoFile with
@@ -141,11 +142,4 @@ let getTwitterReply (url: string) =
         let previewLink = Regex.Replace(url, "http(s)?://(www\.)?(twitter|x).com(/.*)?", "https://fixupx.com$4")
         Some (Message previewLink)
 
-let getTwitterLinks input =
-    input
-    |> Option.map (fun text ->
-        Regex.Matches(text, "http(s)?://(www\.)?(x|twitter).com/(.*)")
-        |> Seq.cast<Match>
-        |> Seq.map (_.Value)
-        |> Seq.toList)
-    |> Option.defaultValue List.empty
+let getTwitterLinks (_: string option) = getLinks twitterRegex

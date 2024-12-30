@@ -9,23 +9,22 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <Content Include=".dockerignore" />
+    <Content Include=".gitignore" />
+    <Content Include="Dockerfile" />
+    <Content Include="igHeaders.json" CopyToPublishDirectory="Always" CopyToOutputDirectory="Always"/>
+    <Content Include="igUrlContent.json" CopyToPublishDirectory="Always" CopyToOutputDirectory="Always"/>
+  </ItemGroup>
+
+  <ItemGroup>
     <Compile Include="Policies.fs" />
     <Compile Include="Text.fs" />
     <Compile Include="VideoDownloader.fs" />
     <Compile Include="Instagram.fs" />
     <Compile Include="TikTok.fs" />
     <Compile Include="Twitter.fs" />
+    <Compile Include="Youtube.fs" />
     <Compile Include="Program.fs" />
-  </ItemGroup>
-    
-  <ItemGroup>
-    <Content Include=".dockerignore" />
-    <Content Include=".gitignore" />
-    <Content Include="Dockerfile" />
-    <Content Include="replacements" CopyToPublishDirectory="Always" CopyToOutputDirectory="Always"/>
-    <Content Include="igHeaders.json" CopyToPublishDirectory="Always" CopyToOutputDirectory="Always"/>
-    <Content Include="igUrlContent.json" CopyToPublishDirectory="Always" CopyToOutputDirectory="Always"/>
-    <Content Include="replacements" CopyToPublishDirectory="Always" CopyToOutputDirectory="Always"/>
   </ItemGroup>
 
   <ItemGroup>
@@ -34,6 +33,8 @@
     <PackageReference Include="Funogram.Telegram" Version="7.10.0" />
     <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
     <PackageReference Include="Polly" Version="8.5.0" />
+    <PackageReference Include="YoutubeExplode" Version="6.5.0" />
+    <PackageReference Include="YoutubeExplode.Converter" Version="6.5.0" />
   </ItemGroup>
 
 </Project>

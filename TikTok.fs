@@ -38,14 +38,7 @@ let private fetchWithHeadersAsync (url: string) =
                |> Option.bind (fun m -> Some m.Groups[1].Value)
     }
 
-let getTikTokLinkIds input =
-    input
-    |> Option.map (fun text ->
-        Regex.Matches(text, "http(s)?://(www\.)?(\w+\.)?tiktok.com/(.*)")
-        |> Seq.cast<Match>
-        |> Seq.map (_.Value)
-        |> Seq.toList)
-    |> Option.defaultValue List.empty
+let getTikTokLinks (_: string option) = getLinks @"http(s)?://(www\.)?(\w+\.)?tiktok.com/(.*)"
 
 let getTikTokReply (url: string) =
     async {

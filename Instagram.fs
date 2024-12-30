@@ -38,10 +38,10 @@ let private urlContent =
     loadJsonFromFile<KeyValuePair<string, string>[]>("igUrlContent.json")
     |> Array.toList
 
-let private regex = @"(?:https?:\/\/(?:www\.)?instagram\.com\/(?:reels?|p)\/)([\w-]+)"
+let private igRegex = @"(?:https?:\/\/(?:www\.)?instagram\.com\/(?:reels?|p)\/)([\w-]+)"
 
 let private extractReelId url =
-    let m = Regex.Match(url, regex)
+    let m = Regex.Match(url, igRegex)
     if m.Success then Some m.Groups.[1].Value else None
 
 let private getContentPostId postId =
@@ -55,7 +55,7 @@ let private getMediaIdRequest reelsId =
     headers |> Seq.iter (fun kvp -> requestMessage.Headers.TryAddWithoutValidation(kvp.Key, kvp.Value) |> ignore)
     requestMessage
 
-let processInstagramVideo (url: string) =
+let getInstagramReply (url: string) =
     match extractReelId url with
         | Some rId ->
             let fileName = $"tt_{rId}_{Guid.NewGuid()}.mp4"
@@ -71,7 +71,4 @@ let processInstagramVideo (url: string) =
                 VideoFile (fileName, ""))
         | None -> None
 
-let getInstagramLinks input =
-    input
-    |> Option.map (fun text -> Regex.Matches(text, regex) |> Seq.cast<Match> |> Seq.map (_.Value) |> Seq.toList)
-    |> Option.defaultValue List.empty
+let getInstagramLinks (_: string option) = getLinks igRegex
