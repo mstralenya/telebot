@@ -1,7 +1,6 @@
 ﻿module Telebot.Youtube
 
 open System
-open System.Collections.Generic
 open System.Threading.Tasks
 open Telebot.Text
 open YoutubeExplode
