@@ -5,6 +5,7 @@
     <TargetFramework>net8.0</TargetFramework>
     <DockerDefaultTargetOS>Linux</DockerDefaultTargetOS>
     <AssemblyName>Telebot</AssemblyName>
+    <RootNamespace>Telebot</RootNamespace>
   </PropertyGroup>
 
   <ItemGroup>
@@ -13,6 +14,7 @@
     <Compile Include="VideoDownloader.fs" />
     <Compile Include="Instagram.fs" />
     <Compile Include="TikTok.fs" />
+    <Compile Include="Twitter.fs" />
     <Compile Include="Program.fs" />
   </ItemGroup>
     
@@ -20,7 +22,7 @@
     <Content Include=".dockerignore" />
     <Content Include=".gitignore" />
     <Content Include="Dockerfile" />
-    <Content Include="replacements" />
+    <Content Include="replacements" CopyToPublishDirectory="Always" CopyToOutputDirectory="Always"/>
     <Content Include="igHeaders.json" CopyToPublishDirectory="Always" CopyToOutputDirectory="Always"/>
     <Content Include="igUrlContent.json" CopyToPublishDirectory="Always" CopyToOutputDirectory="Always"/>
     <Content Include="replacements" CopyToPublishDirectory="Always" CopyToOutputDirectory="Always"/>

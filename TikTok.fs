@@ -43,7 +43,7 @@ let private fetchWithHeadersAsync (url: string option) =
 let getTikTokLinkIds input =
     input
     |> Option.map (fun text ->
-        Regex.Matches(text, "http(s)?://(www\.)?(vm.)tiktok.com/(.*)")
+        Regex.Matches(text, "http(s)?://(www\.)?(\w+\.)?tiktok.com/(.*)")
         |> Seq.cast<Match>
         |> Seq.map (_.Value)
         |> Seq.toList)
