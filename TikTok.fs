@@ -4,6 +4,7 @@ open System
 open System.Net.Http
 open System.Text.RegularExpressions
 open Newtonsoft.Json.Linq
+open Serilog
 open Telebot.Text
 open Telebot.VideoDownloader
 open Telebot.Policies
@@ -50,10 +51,10 @@ let getTikTokReply (url: string) =
                    |> Option.map (fun videoUrl ->
                        let fileName = $"tt_{id}_{Guid.NewGuid()}.mp4"
                        downloadVideoAsync videoUrl fileName |> Async.RunSynchronously
-                       printfn $"Video downloaded to %s{fileName}"
+                       Log.Information $"Video downloaded to %s{fileName}"
                        VideoFile (fileName, ""))
         | None ->
-            printfn "Video ID not found"
+            Log.Information "Video ID not found"
             return None
     }
     |> Async.RunSynchronously

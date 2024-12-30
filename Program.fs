@@ -5,6 +5,7 @@ open Funogram.Api
 open Funogram.Telegram
 open Funogram.Telegram.Bot
 open Funogram.Telegram.Types
+open Serilog
 open Telebot.Twitter
 open Telebot.Youtube
 open dotenv.net
@@ -47,6 +48,18 @@ let processInstagramLinks = processLinks getInstagramLinks getInstagramReply
 let processTwitterLinks = processLinks getTwitterLinks getTwitterReply
 let processYoutubeLinks = processLinks getYoutubeLinks getYoutubeReply
 
+let tryThreeTimes (processMessage: unit -> unit) =
+    let rec tryWithRetries retriesLeft =
+        try
+            processMessage()
+        with
+        | ex ->
+            if retriesLeft > 0 then
+                tryWithRetries (retriesLeft - 1)
+            else
+                Log.Error(ex, "Error occurred. No more retries left.")
+    tryWithRetries 3
+
 let updateArrived (ctx: UpdateContext) =
     match ctx.Update.Message with
     | Some { MessageId = messageId; Chat = chat; Text = messageText } ->
@@ -56,17 +69,20 @@ let updateArrived (ctx: UpdateContext) =
             processTikTokVideos
             processInstagramLinks
             processTwitterLinks
-            // processYoutubeLinks
+            processYoutubeLinks
         ]
-        |> List.iter (fun processMessage -> processMessage(messageText, mId, cId, ctx))
+        |> List.iter (fun processMessage -> tryThreeTimes (fun () -> processMessage(messageText, mId, cId, ctx)))
     | _ -> ()
-
 
 [<EntryPoint>]
 let main _ =
+  Log.Logger <- LoggerConfiguration()
+                    .WriteTo.Console()
+                    .CreateLogger()
   async {
     let config = Config.defaultConfig |> Config.withReadTokenFromEnv "TELEGRAM_BOT_TOKEN"
     let! _ = Api.deleteWebhookBase () |> api config
     return! startBot config updateArrived None
   } |> Async.RunSynchronously
+  Log.CloseAndFlush()
   0
