@@ -45,14 +45,19 @@ let processLinks getLinks processVideo = processVideos getLinks processVideo
 let processTikTokVideos = processLinks getTikTokLinks getTikTokReply
 let processInstagramLinks = processLinks getInstagramLinks getInstagramReply
 let processTwitterLinks = processLinks getTwitterLinks getTwitterReply
-let processYoutubeLinks = processLinks getYoutubeLinks getYoutubeReply
+// let processYoutubeLinks = processLinks getYoutubeLinks getYoutubeReply
 
 let updateArrived (ctx: UpdateContext) =
     match ctx.Update.Message with
     | Some { MessageId = messageId; Chat = chat; Text = messageText } ->
         let mId = MessageId.Create(messageId)
         let cId = ChatId.Int(chat.Id)
-        [ processTikTokVideos; processInstagramLinks; processTwitterLinks; processYoutubeLinks ]
+        [
+            processTikTokVideos
+            processInstagramLinks
+            processTwitterLinks
+            // processYoutubeLinks
+        ]
         |> List.iter (fun processMessage -> processMessage(messageText, mId, cId, ctx))
     | _ -> ()
 
