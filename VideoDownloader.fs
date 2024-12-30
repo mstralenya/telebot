@@ -4,7 +4,7 @@ open System.IO
 open System.Net.Http
 open Telebot.Policies
 
-let downloadVideoAsync(url: string, filePath: string) =
+let downloadVideoAsync(url: string) (filePath: string) =
     async {
         use client = new HttpClient()
         let! response = executeWithPolicyAsync (client.GetAsync(url) |> Async.AwaitTask)

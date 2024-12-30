@@ -5,6 +5,7 @@ open Funogram.Api
 open Funogram.Telegram
 open Funogram.Telegram.Bot
 open Funogram.Telegram.Types
+open Telebot.Twitter
 open dotenv.net
 open Telebot.Text
 open Telebot.VideoDownloader
@@ -15,9 +16,9 @@ DotEnv.Load()
 
 let reply (reply: Reply, messageId: MessageId, chatId: ChatId, ctx: UpdateContext) =
     match reply with
-    | VideoFile videoFile ->
+    | VideoFile (videoFile, replyText) ->
         let file = InputFile.File(videoFile, new FileStream(videoFile, FileMode.Open, FileAccess.Read))
-        Req.SendVideo.Make(chatId=chatId, video=file, replyParameters=ReplyParameters.Create(messageId.MessageId, chatId))
+        Req.SendVideo.Make(chatId=chatId, video=file, caption = replyText, parseMode = ParseMode.HTML, replyParameters=ReplyParameters.Create(messageId.MessageId, chatId))
         |> api ctx.Config
         |> Async.Ignore
         |> Async.RunSynchronously
@@ -33,18 +34,19 @@ let processVideos getLinks processVideo (messageText: string option, messageId: 
     links |> List.iter (fun link ->
         let video = processVideo link
         match video with
-        | Some loadedVideoFile -> reply(VideoFile loadedVideoFile, messageId, chatId, ctx)
+        | Some (VideoFile (loadedVideoFile, replyText)) -> reply(VideoFile (loadedVideoFile, replyText), messageId, chatId, ctx)
+        | Some (Message message) -> reply(Message message, messageId, chatId, ctx)
         | None -> ()
     )
 
 let processTikTokVideos (messageText: string option, messageId: MessageId, chatId: ChatId, ctx: UpdateContext) =
-    processVideos getTikTokLinkIds (fun link -> processTikTokVideo (Some link)) (messageText, messageId, chatId, ctx)
+    processVideos getTikTokLinkIds getTikTokReply (messageText, messageId, chatId, ctx)
 
 let processInstagramLinks (messageText: string option, messageId: MessageId, chatId: ChatId, ctx: UpdateContext) =
-    processVideos getInstagramLinks (fun link -> processInstagramVideoAsync link |> Async.RunSynchronously) (messageText, messageId, chatId, ctx)
-
-let processReplacements (messageText: string option, messageId: MessageId, chatId: ChatId, ctx: UpdateContext) =
-    applyReplacements messageText |> List.iter (fun text -> reply(Message text, messageId, chatId, ctx))
+    processVideos getInstagramLinks processInstagramVideo (messageText, messageId, chatId, ctx)
+    
+let processTwitterLinks (messageText: string option, messageId: MessageId, chatId: ChatId, ctx: UpdateContext) =
+    processVideos getTwitterLinks getTwitterReply (messageText, messageId, chatId, ctx)
 
 let updateArrived (ctx: UpdateContext) =
   match ctx.Update.Message with
@@ -53,7 +55,7 @@ let updateArrived (ctx: UpdateContext) =
     let cId = ChatId.Int(chat.Id)
     processTikTokVideos (messageText, mId, cId, ctx)
     processInstagramLinks (messageText, mId, cId, ctx)
-    processReplacements (messageText, mId, cId, ctx)
+    processTwitterLinks (messageText, mId, cId, ctx)
   | _ -> ()
 
 [<EntryPoint>]

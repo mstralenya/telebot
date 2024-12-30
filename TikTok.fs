@@ -4,6 +4,7 @@ open System
 open System.Net.Http
 open System.Text.RegularExpressions
 open Newtonsoft.Json.Linq
+open Telebot.Text
 open Telebot.VideoDownloader
 open Telebot.Policies
 
@@ -25,19 +26,16 @@ let private getVideoUrl json =
         |> Option.map (_.ToString())
     with _ -> None
 
-let private fetchWithHeadersAsync (url: string option) =
+let private fetchWithHeadersAsync (url: string) =
     async {
-        match url with
-        | Some link ->
-            use client = new HttpClient()
-            client.DefaultRequestHeaders.Add("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_10_1) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/39.0.2171.95 Safari/537.36")
-            let! response = executeWithPolicyAsync (client.GetAsync(link) |> Async.AwaitTask)
-            response.EnsureSuccessStatusCode() |> ignore
-            let! content = response.Content.ReadAsStringAsync() |> Async.AwaitTask
-            return Regex.Match(content, "item_id=(\d+)")
-                   |> Option.ofObj
-                   |> Option.bind (fun m -> Some m.Groups[1].Value)
-        | None -> return None
+        use client = new HttpClient()
+        client.DefaultRequestHeaders.Add("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_10_1) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/39.0.2171.95 Safari/537.36")
+        let! response = executeWithPolicyAsync (client.GetAsync(url) |> Async.AwaitTask)
+        response.EnsureSuccessStatusCode() |> ignore
+        let! content = response.Content.ReadAsStringAsync() |> Async.AwaitTask
+        return Regex.Match(content, "item_id=(\d+)")
+               |> Option.ofObj
+               |> Option.bind (fun m -> Some m.Groups[1].Value)
     }
 
 let getTikTokLinkIds input =
@@ -49,7 +47,7 @@ let getTikTokLinkIds input =
         |> Seq.toList)
     |> Option.defaultValue List.empty
 
-let processTikTokVideo url =
+let getTikTokReply (url: string) =
     async {
         let! videoId = fetchWithHeadersAsync url
         match videoId with
@@ -58,9 +56,9 @@ let processTikTokVideo url =
             return getVideoUrl feed
                    |> Option.map (fun videoUrl ->
                        let fileName = $"tt_{id}_{Guid.NewGuid()}.mp4"
-                       downloadVideoAsync(videoUrl, fileName) |> Async.RunSynchronously
+                       downloadVideoAsync videoUrl fileName |> Async.RunSynchronously
                        printfn $"Video downloaded to %s{fileName}"
-                       fileName)
+                       VideoFile (fileName, ""))
         | None ->
             printfn "Video ID not found"
             return None

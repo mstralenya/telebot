@@ -7,6 +7,7 @@ open System.Net.Http
 open System.Text.Json.Serialization
 open System.Collections.Generic
 open Telebot.Policies
+open Telebot.Text
 open Telebot.VideoDownloader
 open System.Text.Json
 open System.IO
@@ -54,23 +55,21 @@ let private getMediaIdRequest reelsId =
     headers |> Seq.iter (fun kvp -> requestMessage.Headers.TryAddWithoutValidation(kvp.Key, kvp.Value) |> ignore)
     requestMessage
 
-let processInstagramVideoAsync url =
-    async {
-        match extractReelId url with
-        | Some rId -> 
+let processInstagramVideo (url: string) =
+    match extractReelId url with
+        | Some rId ->
             let fileName = $"tt_{rId}_{Guid.NewGuid()}.mp4"
             use mediaIdRequest = getMediaIdRequest rId
             use client = new HttpClient()
-            let! mediaIdResponse = executeWithPolicyAsync (client.SendAsync mediaIdRequest |> Async.AwaitTask)
-            let! apiResponse = mediaIdResponse.Content.ReadFromJsonAsync<InstagramMediaResponse>() |> Async.AwaitTask
-            return apiResponse.Data
-                   |> Option.bind (_.InstagramXdt)
-                   |> Option.bind (_.VideoUrl)
-                   |> Option.map (fun vUrl -> 
-                       downloadVideoAsync (vUrl, fileName) |> Async.RunSynchronously
-                       fileName)
-        | None -> return None
-    }
+            let mediaIdResponse = executeWithPolicyAsync (client.SendAsync mediaIdRequest |> Async.AwaitTask) |> Async.RunSynchronously
+            let apiResponse = mediaIdResponse.Content.ReadFromJsonAsync<InstagramMediaResponse>().Result
+            apiResponse.Data
+            |> Option.bind (_.InstagramXdt)
+            |> Option.bind (_.VideoUrl)
+            |> Option.map (fun vUrl ->
+                downloadVideoAsync vUrl fileName |> Async.RunSynchronously
+                VideoFile (fileName, ""))
+        | None -> None
 
 let getInstagramLinks input =
     input
