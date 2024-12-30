@@ -133,8 +133,8 @@ let getTwitterReply (url: string) =
         let text = getJsonPathValue tweetResult "data.tweetResult.result.legacy.full_text"
         let replyText = 
             match author, authorHandle, text with
-            | Some a, Some ah, Some t -> $"<b>{a}</b> <i>(@{ah})</i>: <blockquote>{t}</blockquote>"
-            | Some a, Some ah, _ -> $"<b>{a}</b> <i>(@{ah})</i>:"
+            | Some a, Some ah, Some t -> $"<b>{a}</b> <i>(@​{ah})</i>: <blockquote>{t}</blockquote>"
+            | Some a, Some ah, _ -> $"<b>{a}</b> <i>(@​{ah})</i>:"
             | _ -> ""
         Some (VideoFile (fileName, replyText))
     | None ->
