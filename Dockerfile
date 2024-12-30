@@ -1,4 +1,8 @@
 ﻿FROM mcr.microsoft.com/dotnet/runtime:8.0-alpine AS base
+# Install FFmpeg using apk
+RUN apk update && \
+    apk add --no-cache ffmpeg && \
+    rm -rf /var/cache/apk/*
 USER $APP_UID
 WORKDIR /app
 
