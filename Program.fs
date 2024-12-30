@@ -56,7 +56,7 @@ let updateArrived (ctx: UpdateContext) =
             processTikTokVideos
             processInstagramLinks
             processTwitterLinks
-            processYoutubeLinks
+            // processYoutubeLinks
         ]
         |> List.iter (fun processMessage -> processMessage(messageText, mId, cId, ctx))
     | _ -> ()
