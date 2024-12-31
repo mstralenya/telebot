@@ -17,27 +17,46 @@ open Telebot.Instagram
 
 DotEnv.Load()
 
-DotEnv.Load()
+let sendRequestAsync (req: 'TReq) (ctx: UpdateContext) =
+    req |> api ctx.Config |> Async.Ignore
 
 let reply (reply: Reply, messageId: MessageId, chatId: ChatId, ctx: UpdateContext) =
     match reply with
     | VideoFile (videoFile, replyText, thumbnail) ->
-        let file = InputFile.File(videoFile, File.OpenRead(videoFile))
-        let rt = replyText |> Option.defaultValue ""
-        let t = thumbnail |> Option.map (fun t -> InputFile.Url (Uri t))
-        let req =
-            match t with
-            | Some thumb -> Req.SendVideo.Make(chatId=chatId, video=file, caption=rt, parseMode=ParseMode.HTML, thumbnail=thumb, replyParameters=ReplyParameters.Create(messageId.MessageId, chatId))
-            | None -> Req.SendVideo.Make(chatId=chatId, video=file, caption=rt, parseMode=ParseMode.HTML, replyParameters=ReplyParameters.Create(messageId.MessageId, chatId))
-        req |> api ctx.Config
-        |> Async.Ignore
-        |> Async.RunSynchronously
-        deleteVideo videoFile
+        // Check the file size
+        let fileInfo = FileInfo(videoFile)
+        if fileInfo.Length > 50L * 1024L * 1024L then
+            Log.Information $"File size is greater than 50 MB. Deleting file: %s{videoFile}"
+            deleteFile videoFile
+        else
+            let file = InputFile.File(videoFile, File.OpenRead(videoFile))
+            let rt = replyText |> Option.defaultValue ""
+            let thumbnailInput = thumbnail |> Option.map (fun t -> InputFile.File(t, File.OpenRead(t)))
+            let req =
+                match thumbnailInput with
+                | Some thumb ->
+                    Req.SendVideo.Make(
+                        chatId=chatId,
+                        video=file,
+                        caption=rt,
+                        parseMode=ParseMode.HTML,
+                        thumbnail=thumb,
+                        replyParameters=ReplyParameters.Create(messageId.MessageId, chatId)
+                    )
+                | None ->
+                    Req.SendVideo.Make(
+                        chatId=chatId,
+                        video=file,
+                        caption=rt,
+                        parseMode=ParseMode.HTML,
+                        replyParameters=ReplyParameters.Create(messageId.MessageId, chatId)
+                    )
+            sendRequestAsync req ctx |> Async.RunSynchronously
+            deleteFile videoFile
+            thumbnail |> Option.map deleteFile |> Option.iter ignore
     | Message message ->
-        Req.SendMessage.Make(chatId, message, replyParameters=ReplyParameters.Create(messageId.MessageId, chatId))
-        |> api ctx.Config
-        |> Async.Ignore
-        |> Async.Start
+        let req = Req.SendMessage.Make(chatId, message, replyParameters=ReplyParameters.Create(messageId.MessageId, chatId))
+        sendRequestAsync req ctx |> Async.Start
 
 let processVideos getLinks processVideo (messageText: string option, messageId: MessageId, chatId: ChatId, ctx: UpdateContext) =
     messageText

@@ -1,9 +1,12 @@
 ﻿module Telebot.Youtube
 
 open System
+open System.IO
+open System.Net.Http
 open System.Threading.Tasks
 open Serilog
 open Telebot.Text
+open Telebot.VideoDownloader
 open YoutubeExplode
 open YoutubeExplode.Converter
 open YoutubeExplode.Videos.Streams
@@ -12,6 +15,15 @@ open YoutubeExplode.Videos.Streams
 let private toTask (valueTask: ValueTask<'T>) = valueTask.AsTask()
 
 let getYoutubeLinks (_: string option) = getLinks @"https:\/\/(youtu\.be\/[a-zA-Z0-9_-]+|www\.youtube\.com\/(watch\?v=[a-zA-Z0-9_-]+|shorts\/[a-zA-Z0-9_-]+))"
+
+let private downloadFileAsync (url: string) (filePath: string) =
+    async {
+        use client = new HttpClient()
+        let! response = client.GetAsync(url) |> Async.AwaitTask
+        response.EnsureSuccessStatusCode() |> ignore
+        let! content = response.Content.ReadAsByteArrayAsync() |> Async.AwaitTask
+        File.WriteAllBytes(filePath, content)
+    }
 
 let getYoutubeReply (url: string) =
     async {
@@ -39,6 +51,8 @@ let getYoutubeReply (url: string) =
                           |> Seq.maxBy (_.Bitrate.KiloBitsPerSecond)
 
         let thumbnailUrl = video.Thumbnails |> Seq.maxBy(_.Resolution.Width) |> _.Url
+        let thumbnailName = $"{fileName}.jpg"
+        downloadVideoAsync thumbnailUrl thumbnailName |> Async.RunSynchronously
 
         // Download the video
         Log.Information $"Downloading stream: %s{videoStream.Url}"
@@ -52,5 +66,5 @@ let getYoutubeReply (url: string) =
 
         Log.Information $"Video downloaded successfully: %s{fileName}"
 
-        return Some (VideoFile (fileName, Some video.Title, Some thumbnailUrl))
+        return Some (VideoFile (fileName, Some video.Title, Some thumbnailName))
     } |> Async.RunSynchronously

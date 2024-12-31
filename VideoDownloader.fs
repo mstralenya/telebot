@@ -13,5 +13,5 @@ let downloadVideoAsync(url: string) (filePath: string) =
         File.WriteAllBytes(filePath, content)
     }
 
-let deleteVideo(filePath: string) =
+let deleteFile(filePath: string) =
     if File.Exists(filePath) then File.Delete(filePath)
