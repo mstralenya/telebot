@@ -137,7 +137,7 @@ let getTwitterReply (url: string) =
             | Some a, Some ah, Some t -> $"<b>{a}</b> <i>(@​{ah})</i>: <blockquote>{t}</blockquote>"
             | Some a, Some ah, _ -> $"<b>{a}</b> <i>(@​{ah})</i>:"
             | _ -> ""
-        Some (VideoFile (fileName, replyText))
+        Some (VideoFile (fileName, Some replyText, None))
     | None ->
         let previewLink = Regex.Replace(url, "http(s)?://(www\.)?(twitter|x).com(/.*)?", "https://fixupx.com$4")
         Some (Message previewLink)

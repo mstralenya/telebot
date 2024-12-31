@@ -1,5 +1,6 @@
 ﻿module Program
 
+open System
 open System.IO;
 open Funogram.Api
 open Funogram.Telegram
@@ -20,10 +21,15 @@ DotEnv.Load()
 
 let reply (reply: Reply, messageId: MessageId, chatId: ChatId, ctx: UpdateContext) =
     match reply with
-    | VideoFile (videoFile, replyText) ->
+    | VideoFile (videoFile, replyText, thumbnail) ->
         let file = InputFile.File(videoFile, File.OpenRead(videoFile))
-        Req.SendVideo.Make(chatId=chatId, video=file, caption=replyText, parseMode=ParseMode.HTML, replyParameters=ReplyParameters.Create(messageId.MessageId, chatId))
-        |> api ctx.Config
+        let rt = replyText |> Option.defaultValue ""
+        let t = thumbnail |> Option.map (fun t -> InputFile.Url (Uri t))
+        let req =
+            match t with
+            | Some thumb -> Req.SendVideo.Make(chatId=chatId, video=file, caption=rt, parseMode=ParseMode.HTML, thumbnail=thumb, replyParameters=ReplyParameters.Create(messageId.MessageId, chatId))
+            | None -> Req.SendVideo.Make(chatId=chatId, video=file, caption=rt, parseMode=ParseMode.HTML, replyParameters=ReplyParameters.Create(messageId.MessageId, chatId))
+        req |> api ctx.Config
         |> Async.Ignore
         |> Async.RunSynchronously
         deleteVideo videoFile

@@ -3,7 +3,7 @@
 open System.Text.RegularExpressions
 
 type Reply =
-    | VideoFile of string * string
+    | VideoFile of file: string * caption: string option * thumbnail: string option
     | Message of string
 
 let getLinks (regex: string) (text: string option) =

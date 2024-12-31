@@ -9,10 +9,9 @@ open YoutubeExplode.Converter
 open YoutubeExplode.Videos.Streams
 
 // Helper function to convert ValueTask<T> to Task<T>
-let toTask (valueTask: ValueTask<'T>) = valueTask.AsTask()
+let private toTask (valueTask: ValueTask<'T>) = valueTask.AsTask()
 
 let getYoutubeLinks (_: string option) = getLinks @"https:\/\/(youtu\.be\/[a-zA-Z0-9_-]+|www\.youtube\.com\/(watch\?v=[a-zA-Z0-9_-]+|shorts\/[a-zA-Z0-9_-]+))"
-
 
 let getYoutubeReply (url: string) =
     async {
@@ -39,6 +38,8 @@ let getYoutubeReply (url: string) =
         let audioStream = streamManifest.GetAudioOnlyStreams()
                           |> Seq.maxBy (_.Bitrate.KiloBitsPerSecond)
 
+        let thumbnailUrl = video.Thumbnails |> Seq.maxBy(_.Resolution.Width) |> _.Url
+
         // Download the video
         Log.Information $"Downloading stream: %s{videoStream.Url}"
 
@@ -51,5 +52,5 @@ let getYoutubeReply (url: string) =
 
         Log.Information $"Video downloaded successfully: %s{fileName}"
 
-        return Some (VideoFile (fileName, video.Title))
+        return Some (VideoFile (fileName, Some video.Title, Some thumbnailUrl))
     } |> Async.RunSynchronously
