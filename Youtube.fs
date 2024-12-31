@@ -46,6 +46,7 @@ let getYoutubeReply (url: string) =
         // Get the best video stream (e.g., highest quality)
         let videoStream = streamManifest.GetVideoOnlyStreams()
                           |> Seq.filter (fun c -> c.Container = Container.Mp4)
+                          |> Seq.filter (fun c -> c.Size.MegaBytes < 50)
                           |> Seq.maxBy (_.Bitrate.KiloBitsPerSecond)
         let audioStream = streamManifest.GetAudioOnlyStreams()
                           |> Seq.maxBy (_.Bitrate.KiloBitsPerSecond)
