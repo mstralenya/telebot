@@ -14,7 +14,7 @@ open YoutubeExplode.Videos.Streams
 // Helper function to convert ValueTask<T> to Task<T>
 let private toTask (valueTask: ValueTask<'T>) = valueTask.AsTask()
 
-let getYoutubeLinks (_: string option) = getLinks @"https:\/\/(youtu\.be\/[a-zA-Z0-9_-]+|www\.youtube\.com\/(watch\?v=[a-zA-Z0-9_-]+|shorts\/[a-zA-Z0-9_-]+))"
+let getYoutubeLinks (_: string option) = getLinks @"https:\/\/(youtu\.be\/[a-zA-Z0-9_-]+|(?:www\.)?youtube\.com\/(watch\?v=[a-zA-Z0-9_-]+|shorts\/[a-zA-Z0-9_-]+))"
 
 let private downloadFileAsync (url: string) (filePath: string) =
     async {
@@ -43,30 +43,40 @@ let getYoutubeReply (url: string) =
         // Get available streams for the video
         let! streamManifest = youtube.Videos.Streams.GetManifestAsync(url) |> toTask |> Async.AwaitTask
 
+        Log.Information $"Video Stream options: %A{streamManifest.GetVideoOnlyStreams() |> Seq.toList |> List.map (fun x -> (x.Container, x.Bitrate, x.Size, x.VideoResolution, x.VideoCodec))}"
+        Log.Information $"Audio Stream options: %A{streamManifest.GetAudioOnlyStreams() |> Seq.toList |> List.map (fun x -> (x.Container, x.Bitrate, x.Size, x.AudioCodec))}"
+        
         // Get the best video stream (e.g., highest quality)
         let videoStream = streamManifest.GetVideoOnlyStreams()
                           |> Seq.filter (fun c -> c.Container = Container.Mp4)
                           |> Seq.filter (fun c -> c.Size.MegaBytes < 48) // Filter out streams larger than 48 MB since limit for file is 50 MB and we need also add sound stream    
-                          |> Seq.maxBy (_.Bitrate.KiloBitsPerSecond)
+                          |> Seq.tryMaxBy (_.Bitrate.KiloBitsPerSecond)
         let audioStream = streamManifest.GetAudioOnlyStreams()
                           |> Seq.filter (fun c -> c.Size.MegaBytes < 2)
-                          |> Seq.maxBy (_.Bitrate.KiloBitsPerSecond)
+                          |> Seq.tryMaxBy (_.Bitrate.KiloBitsPerSecond)
 
-        let thumbnailUrl = video.Thumbnails |> Seq.maxBy(_.Resolution.Width) |> _.Url
-        let thumbnailName = $"{fileName}.jpg"
-        downloadVideoAsync thumbnailUrl thumbnailName |> Async.RunSynchronously
+        match (videoStream, audioStream) with
+        | (Some videoS, Some audioS) ->
+            let thumbnailUrl: string = video.Thumbnails |> Seq.maxBy(_.Resolution.Width) |> _.Url
+            let thumbnailName = $"{fileName}.jpg"
+            downloadVideoAsync thumbnailUrl thumbnailName |> Async.RunSynchronously
 
-        // Download the video
-        Log.Information $"Downloading stream: %s{videoStream.Url}"
+            // Download the video
+            Log.Information $"Downloading stream: %s{videoS.Url}"
 
-        let streams : IStreamInfo list = [videoStream; audioStream]
-        let conversionRequest = ConversionRequestBuilder(fileName).Build()
-        youtube.Videos.DownloadAsync(streams, conversionRequest)
-            |> _.AsTask() // Convert ValueTask to Task
-            |> Async.AwaitTask // Await the Task
-            |> Async.RunSynchronously
+            let streams : IStreamInfo list = [videoS; audioS]
+            let conversionRequest = ConversionRequestBuilder(fileName).Build()
+            youtube.Videos.DownloadAsync(streams, conversionRequest)
+                |> _.AsTask() // Convert ValueTask to Task
+                |> Async.AwaitTask // Await the Task
+                |> Async.RunSynchronously
 
-        Log.Information $"Video downloaded successfully: %s{fileName}"
+            Log.Information $"Video downloaded successfully: %s{fileName}, resolution {videoS.VideoResolution}, fileSize {videoS.Size}"
 
-        return Some (VideoFile (fileName, Some video.Title, Some thumbnailName))
+            return Some (VideoFile (fileName, Some video.Title, Some thumbnailName))
+        | _ ->
+            Log.Warning "No suitable streams found for the video. Download aborted."
+            return Some(Message "Cannot download video due size limits")
+        
+        
     } |> Async.RunSynchronously
