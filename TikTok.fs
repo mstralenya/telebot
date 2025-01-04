@@ -52,7 +52,7 @@ let getTikTokReply (url: string) =
                        let fileName = $"tt_{id}_{Guid.NewGuid()}.mp4"
                        downloadVideoAsync videoUrl fileName |> Async.RunSynchronously
                        Log.Information $"Video downloaded to %s{fileName}"
-                       VideoFile (fileName, None, None))
+                       VideoFile (fileName, None, None, None))
         | None ->
             Log.Information "Video ID not found"
             return None

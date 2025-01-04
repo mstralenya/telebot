@@ -48,8 +48,7 @@ let getYoutubeReply (url: string) =
         
         // Get the best video stream (e.g., highest quality)
         let videoStream = streamManifest.GetVideoOnlyStreams()
-                          |> Seq.filter (fun c -> c.Container = Container.Mp4)
-                          |> Seq.filter (fun c -> c.Size.MegaBytes < 48) // Filter out streams larger than 48 MB since limit for file is 50 MB and we need also add sound stream    
+                          |> Seq.filter (fun c -> c.Container = Container.Mp4 && c.Size.MegaBytes < 48) // Filter out streams larger than 48 MB since limit for file is 50 MB
                           |> Seq.tryMaxBy (_.Bitrate.KiloBitsPerSecond)
         let audioStream = streamManifest.GetAudioOnlyStreams()
                           |> Seq.filter (fun c -> c.Size.MegaBytes < 2)
@@ -57,7 +56,10 @@ let getYoutubeReply (url: string) =
 
         match (videoStream, audioStream) with
         | (Some videoS, Some audioS) ->
-            let thumbnailUrl: string = video.Thumbnails |> Seq.maxBy(_.Resolution.Width) |> _.Url
+            let thumbnailUrl: string = video.Thumbnails
+                                       |> Seq.filter(fun t -> t.Resolution.Width < 320 && t.Resolution.Height < 320)
+                                       |> Seq.maxBy(_.Resolution.Width)
+                                       |> _.Url
             let thumbnailName = $"{fileName}.jpg"
             downloadVideoAsync thumbnailUrl thumbnailName |> Async.RunSynchronously
 
@@ -73,7 +75,7 @@ let getYoutubeReply (url: string) =
 
             Log.Information $"Video downloaded successfully: %s{fileName}, resolution {videoS.VideoResolution}, fileSize {videoS.Size}"
 
-            return Some (VideoFile (fileName, Some video.Title, Some thumbnailName))
+            return Some (VideoFile (fileName, Some video.Title, Some thumbnailName, Some videoS.VideoResolution))
         | _ ->
             Log.Warning "No suitable streams found for the video. Download aborted."
             return Some(Message "Cannot download video due size limits")

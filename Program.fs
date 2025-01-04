@@ -22,34 +22,30 @@ let sendRequestAsync (req: 'TReq) (ctx: UpdateContext) =
 
 let reply (reply: Reply, messageId: MessageId, chatId: ChatId, ctx: UpdateContext) =
     match reply with
-    | VideoFile (videoFile, replyText, thumbnail) ->
+    | VideoFile (videoFile, replyText, thumbnail, resolution) ->
         // Check the file size
         let fileInfo = FileInfo(videoFile)
         if fileInfo.Length > 50L * 1024L * 1024L then
             Log.Information $"File size is greater than 50 MB. Deleting file: %s{videoFile}"
             deleteFile videoFile
         else
-            let file = InputFile.File(videoFile, File.OpenRead(videoFile))
-            let rt = replyText |> Option.defaultValue ""
+            let video = InputFile.File(videoFile, File.OpenRead(videoFile))
+            let rt = replyText
             let thumbnailInput = thumbnail |> Option.map (fun t -> InputFile.File(t, File.OpenRead(t)))
-            let req =
-                match thumbnailInput with
-                | Some thumb ->
-                    Req.SendVideo.Make(
+            let width = resolution |> Option.map (fun r -> int64 r.Width)
+            let height = resolution |> Option.map (fun r -> int64 r.Height)
+            let req = Req.SendVideo.Make(
                         chatId=chatId,
-                        video=file,
-                        caption=rt,
+                        video=video,
                         parseMode=ParseMode.HTML,
-                        thumbnail=thumb,
-                        replyParameters=ReplyParameters.Create(messageId.MessageId, chatId)
-                    )
-                | None ->
-                    Req.SendVideo.Make(
-                        chatId=chatId,
-                        video=file,
-                        caption=rt,
-                        parseMode=ParseMode.HTML,
-                        replyParameters=ReplyParameters.Create(messageId.MessageId, chatId)
+                        replyParameters=ReplyParameters.Create(messageId.MessageId, chatId),
+                        showCaptionAboveMedia = true,
+                        disableNotification = true,
+                        supportsStreaming = true,
+                        ?width=width,
+                        ?height=height,
+                        ?caption=rt,
+                        ?thumbnail=thumbnailInput
                     )
             sendRequestAsync req ctx |> Async.RunSynchronously
             deleteFile videoFile
@@ -80,6 +76,7 @@ let tryThreeTimes (processMessage: unit -> unit) =
         with
         | ex ->
             if retriesLeft > 0 then
+                Log.Error(ex, $"Error occured, retries left: {retriesLeft}")
                 tryWithRetries (retriesLeft - 1)
             else
                 Log.Error(ex, "Error occurred. No more retries left.")
