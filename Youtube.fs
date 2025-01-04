@@ -5,7 +5,10 @@ open System.IO
 open System.Net.Http
 open System.Threading.Tasks
 open Serilog
+open SixLabors.ImageSharp
+open SixLabors.ImageSharp.Formats.Jpeg
 open Telebot.Text
+open Telebot.Text.Reply
 open Telebot.VideoDownloader
 open YoutubeExplode
 open YoutubeExplode.Converter
@@ -24,6 +27,16 @@ let private downloadFileAsync (url: string) (filePath: string) =
         let! content = response.Content.ReadAsByteArrayAsync() |> Async.AwaitTask
         File.WriteAllBytes(filePath, content)
     }
+
+let private convertWebpToJpeg (inputPath: string) (outputPath: string) =
+    // Load the .webp image
+    use image = Image.Load(inputPath)
+
+    let jpegEncoder = JpegEncoder(Quality = 90)
+
+    // Save the image as .jpeg
+    image.Save(outputPath, jpegEncoder)
+    deleteFile inputPath
 
 let getYoutubeReply (url: string) =
     async {
@@ -57,12 +70,16 @@ let getYoutubeReply (url: string) =
         match (videoStream, audioStream) with
         | (Some videoS, Some audioS) ->
             let thumbnailUrl: string = video.Thumbnails
-                                       |> Seq.filter(fun t -> t.Resolution.Width < 320 && t.Resolution.Height < 320)
+                                       |> Seq.filter(fun t -> t.Resolution.Width < 300 && t.Resolution.Height < 300)
                                        |> Seq.maxBy(_.Resolution.Width)
                                        |> _.Url
-            let thumbnailName = $"{fileName}.jpg"
-            downloadVideoAsync thumbnailUrl thumbnailName |> Async.RunSynchronously
-
+            let thumbnailNameWebp = $"yt_{video.Id.Value}.webp"
+            let thumbnailName = $"yt_{video.Id.Value}.jpg"
+            downloadImageAsync thumbnailUrl thumbnailNameWebp
+                |> Async.AwaitTask
+                |> Async.RunSynchronously
+            convertWebpToJpeg thumbnailNameWebp thumbnailName
+            
             // Download the video
             Log.Information $"Downloading stream: %s{videoS.Url}"
 
@@ -75,10 +92,17 @@ let getYoutubeReply (url: string) =
 
             Log.Information $"Video downloaded successfully: %s{fileName}, resolution {videoS.VideoResolution}, fileSize {videoS.Size}"
 
-            return Some (VideoFile (fileName, Some video.Title, Some thumbnailName, Some videoS.VideoResolution))
+            let title = Some video.Title
+            let resolution = Some videoS.VideoResolution
+            let duration = Some (int64 video.Duration.Value.TotalSeconds)
+            let thumbnailPath = Some(thumbnailName)
+            let reply = createVideoFileWithThumbnail fileName title resolution duration thumbnailPath
+            
+            return Some reply
         | _ ->
             Log.Warning "No suitable streams found for the video. Download aborted."
-            return Some(Message "Cannot download video due size limits")
+            let message = createMessage "Cannot download video due size limits"
+            return Some(message)
         
         
     } |> Async.RunSynchronously

@@ -10,6 +10,7 @@ open System.Text.RegularExpressions
 open System.Web
 open Newtonsoft.Json.Linq
 open Telebot.Text
+open Telebot.Text.Reply
 open Telebot.VideoDownloader
 
 type VideoInfo = {
@@ -134,12 +135,14 @@ let getTwitterReply (url: string) =
         let text = getJsonPathValue tweetResult "data.tweetResult.result.legacy.full_text"
         let replyText = 
             match author, authorHandle, text with
-            | Some a, Some ah, Some t -> $"<b>{a}</b> <i>(@​{ah})</i>: <blockquote>{t}</blockquote>"
-            | Some a, Some ah, _ -> $"<b>{a}</b> <i>(@​{ah})</i>:"
-            | _ -> ""
-        Some (VideoFile (fileName, Some replyText, None, None))
+            | Some a, Some ah, Some t -> Some $"<b>{a}</b> <i>(@​{ah})</i>: <blockquote>{t}</blockquote>"
+            | Some a, Some ah, _ -> Some $"<b>{a}</b> <i>(@​{ah})</i>:"
+            | _ -> None
+        let reply = createVideoFileWithCaption fileName replyText
+        Some reply
     | None ->
         let previewLink = Regex.Replace(url, "http(s)?://(www\.)?(twitter|x).com(/.*)?", "https://fixupx.com$4")
-        Some (Message previewLink)
+        let reply = createMessage previewLink
+        Some reply
 
 let getTwitterLinks (_: string option) = getLinks twitterRegex

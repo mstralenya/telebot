@@ -68,7 +68,7 @@ let getInstagramReply (url: string) =
             |> Option.bind (_.VideoUrl)
             |> Option.map (fun vUrl ->
                 downloadVideoAsync vUrl fileName |> Async.RunSynchronously
-                VideoFile (fileName, None, None, None))
+                Reply.createVideoFile fileName)
         | None -> None
 
 let getInstagramLinks (_: string option) = getLinks igRegex
