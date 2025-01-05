@@ -5,7 +5,7 @@ open System.IO
 open Serilog
 
 let getVideoInfo (videoPath: string) =
-    let ffmpegPath = "ffmpeg" // or full path to ffmpeg.exe if not in PATH
+    let ffmpegPath = "ffprobe" // or full path to ffmpeg.exe if not in PATH
 
     let arguments = $"-i \"{videoPath}\" -hide_banner"
 
