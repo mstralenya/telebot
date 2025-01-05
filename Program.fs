@@ -7,6 +7,7 @@ open Funogram.Telegram
 open Funogram.Telegram.Bot
 open Funogram.Telegram.Types
 open Serilog
+open Telebot.Thumbnail
 open Telebot.Twitter
 open Telebot.Youtube
 open Telebot.Text
@@ -26,11 +27,16 @@ let reply (reply: Reply, messageId: MessageId, chatId: ChatId, ctx: UpdateContex
             Log.Information $"File size is greater than 50 MB. Deleting file: %s{videoFile.File}"
             deleteFile videoFile.File
         else
+            let thumbnailFilename = $"{Guid.NewGuid()}.jpg"
+            extractThumbnail videoFile.File thumbnailFilename
             let video = InputFile.File(videoFile.File, File.OpenRead(videoFile.File))
             let rt = videoFile.Caption
-            let width = videoFile.Resolution |> Option.map (fun r -> int64 r.Width)
-            let height = videoFile.Resolution |> Option.map (fun r -> int64 r.Height)
-            let thumbFile = videoFile.Thumbnail |> Option.map (fun f -> InputFile.File(f, File.OpenRead(f)))
+            let info = getVideoInfo videoFile.File
+            let (duration, width, height) = 
+                match info with
+                | Some (d, w, h) -> (Some d, Some w, Some h)
+                | None -> (None, None, None)
+            let thumbFile = InputFile.File(thumbnailFilename, File.OpenRead(thumbnailFilename))
             let req = Req.SendVideo.Make(
                         chatId,
                         video,
@@ -39,14 +45,15 @@ let reply (reply: Reply, messageId: MessageId, chatId: ChatId, ctx: UpdateContex
                         showCaptionAboveMedia = true,
                         disableNotification = true,
                         supportsStreaming = true,
-                        ?thumbnail = thumbFile,
+                        thumbnail = thumbFile,
                         ?width=width,
                         ?height=height,
-                        ?duration = videoFile.DurationSeconds,
+                        ?duration = duration,
                         ?caption=rt
                     )
             sendRequestAsync req ctx |> Async.RunSynchronously
             deleteFile videoFile.File
+            deleteFile thumbnailFilename
     | Message message ->
         let req = Req.SendMessage.Make(chatId, message, replyParameters=ReplyParameters.Create(messageId.MessageId, chatId))
         sendRequestAsync req ctx |> Async.Start
