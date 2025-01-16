@@ -102,9 +102,9 @@ let updateArrived (ctx: UpdateContext) =
 
 type SerilogLogger() =
   interface Funogram.Types.IBotLogger with
-    member x.Log(text) =
+    member _.Log(text) =
       Log.Information(text)
-    member x.Enabled = true
+    member _.Enabled = true
 
 [<EntryPoint>]
 let main _ =

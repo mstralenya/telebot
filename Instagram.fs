@@ -38,7 +38,7 @@ let private urlContent =
     loadJsonFromFile<KeyValuePair<string, string>[]>("igUrlContent.json")
     |> Array.toList
 
-let private igRegex = @"(?:https?:\/\/(?:www\.)?instagram\.com\/(?:reels?|p)\/)([\w-]+)"
+let private igRegex = @"(?:https?:\/\/(?:www\.)?instagram\.com\/(?:[^\/]+)\/(?:reels?|p)\/)([\w-]+)"
 
 let private extractReelId url =
     let m = Regex.Match(url, igRegex)
