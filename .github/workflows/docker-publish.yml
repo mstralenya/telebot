@@ -12,7 +12,7 @@ env:
   # Use Docker Hub as the registry
   REGISTRY: docker.io
   # Use your Docker Hub username and repository name as the image name
-  IMAGE_NAME: pokemongo/telebot
+  IMAGE_NAME: ${{ github.repository }}
 
 jobs:
   build:
