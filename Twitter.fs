@@ -22,7 +22,7 @@ type VideoInfo = {
     Bitrate: int option
 }
 
-let private twitterRegex = @"https://(x|twitter).com/.*/status/(\d+)"
+let private twitterRegex = Regex(@"https://(x|twitter).com/.*/status/(\d+)", RegexOptions.Compiled)
 
 let private client = new HttpClient()
 
@@ -121,7 +121,7 @@ let private computeHash (input: string) =
 
 let getTwitterReply (url: string) =
     let guestToken = activateGuestToken()
-    let tweetId = Regex.Match(url, twitterRegex).Groups.[2].Value
+    let tweetId = twitterRegex.Match(url).Groups.[2].Value
     let tweetResult = getTweetResultByRestId guestToken tweetId
     let videoFile = getVideoFile tweetResult 
     match videoFile with
@@ -129,7 +129,7 @@ let getTwitterReply (url: string) =
         // Process the video file
         let hash = computeHash videoFile
         let fileName = $"t_{hash}_{Guid.NewGuid()}.mp4"
-        downloadVideoAsync videoFile fileName |> Async.RunSynchronously
+        downloadFileAsync videoFile fileName |> Async.RunSynchronously
         let author = getJsonPathValue tweetResult "data.tweetResult.result.core.user_results.result.legacy.name"
         let authorHandle = getJsonPathValue tweetResult "data.tweetResult.result.core.user_results.result.legacy.screen_name"
         let text = getJsonPathValue tweetResult "data.tweetResult.result.legacy.full_text"

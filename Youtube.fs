@@ -3,6 +3,7 @@
 open System
 open System.IO
 open System.Net.Http
+open System.Text.RegularExpressions
 open System.Threading.Tasks
 open Serilog
 open Telebot.Text
@@ -14,7 +15,9 @@ open YoutubeExplode.Videos.Streams
 // Helper function to convert ValueTask<T> to Task<T>
 let private toTask (valueTask: ValueTask<'T>) = valueTask.AsTask()
 
-let getYoutubeLinks (_: string option) = getLinks @"https:\/\/(youtu\.be\/[a-zA-Z0-9_-]+|(?:www\.)?youtube\.com\/(watch\?v=[a-zA-Z0-9_-]+|shorts\/[a-zA-Z0-9_-]+))"
+let private youtubeRegex = Regex(@"https:\/\/(youtu\.be\/[a-zA-Z0-9_-]+|(?:www\.)?youtube\.com\/(watch\?v=[a-zA-Z0-9_-]+|shorts\/[a-zA-Z0-9_-]+))", RegexOptions.Compiled)
+
+let getYoutubeLinks (_: string option) = getLinks youtubeRegex
 
 let private downloadFileAsync (url: string) (filePath: string) =
     async {

@@ -40,7 +40,9 @@ let private fetchWithHeadersAsync (url: string) =
                |> Option.bind (fun m -> Some m.Groups[1].Value)
     }
 
-let getTikTokLinks (_: string option) = getLinks @"http(s)?://(www\.)?(\w+\.)?tiktok.com/(.*)"
+let private tikTokeRegex = Regex(@"http(s)?://(www\.)?(\w+\.)?tiktok.com/(.*)", RegexOptions.Compiled)
+
+let getTikTokLinks (_: string option) = getLinks tikTokeRegex
 
 let getTikTokReply (url: string) =
     async {
@@ -51,7 +53,7 @@ let getTikTokReply (url: string) =
             return getVideoUrl feed
                    |> Option.map (fun videoUrl ->
                        let fileName = $"tt_{id}_{Guid.NewGuid()}.mp4"
-                       downloadVideoAsync videoUrl fileName |> Async.RunSynchronously
+                       downloadFileAsync videoUrl fileName |> Async.RunSynchronously
                        Log.Information $"Video downloaded to %s{fileName}"
                        createVideoFile fileName)
         | None ->
