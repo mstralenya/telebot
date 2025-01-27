@@ -57,19 +57,27 @@ let reply (reply: Reply, messageId: MessageId, chatId: ChatId, ctx: UpdateContex
                 )
 
             sendRequestAsync req ctx |> Async.RunSynchronously
-            deleteFile videoFile.File
-            deleteFile thumbnailFilename
+            [thumbnailFilename; videoFile.File] |> Seq.iter deleteFile
     | ImageGallery imageGallery ->
         let gallery =
             imageGallery.Photos
-            |> Seq.map (fun p ->
-                InputMedia.Photo(
-                    InputMediaPhoto.Create(
-                        "photo",
-                        InputFile.File(p, File.OpenRead(p)),
-                        ?caption = imageGallery.Caption
-                    )
-                ))
+            |> Seq.map (fun g ->
+                match g with
+                | Photo p -> 
+                    InputMedia.Photo(
+                        InputMediaPhoto.Create(
+                            "photo",
+                            InputFile.File(p, File.OpenRead(p)),
+                            ?caption = imageGallery.Caption
+                        ))
+                | Video v ->
+                    InputMedia.Video(
+                        InputMediaVideo.Create(
+                            "video",
+                            InputFile.File(v, File.OpenRead(v)),
+                            ?caption = imageGallery.Caption
+                        ))
+                )
             |> Seq.toArray
 
         let req =
@@ -81,7 +89,7 @@ let reply (reply: Reply, messageId: MessageId, chatId: ChatId, ctx: UpdateContex
             )
 
         sendRequestAsync req ctx |> Async.RunSynchronously
-        imageGallery.Photos |> Seq.iter deleteFile
+        imageGallery.Photos |> Seq.map(string) |> Seq.iter deleteFile
     | Message message ->
         let req =
             Req.SendMessage.Make(chatId, message, replyParameters = ReplyParameters.Create(messageId.MessageId, chatId))

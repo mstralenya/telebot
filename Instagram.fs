@@ -18,6 +18,84 @@ type PostType =
     | Post of string
     | Nothing
 
+open System.Text.Json.Serialization
+
+type Dimension = {
+    [<JsonPropertyName("height")>]
+    Height: int
+    [<JsonPropertyName("width")>]
+    Width: int
+}
+
+type SharingFrictionInfo = {
+    [<JsonPropertyName("should_have_sharing_friction")>]
+    ShouldHaveSharingFriction: bool
+    [<JsonPropertyName("bloks_app_url")>]
+    BloksAppUrl: string option
+}
+
+type DisplayResource = {
+    [<JsonPropertyName("src")>]
+    SourceUrl: string
+    [<JsonPropertyName("config_width")>]
+    ConfigWidth: int
+    [<JsonPropertyName("config_height")>]
+    ConfigHeight: int
+}
+
+type TaggedUserEdge = {
+    [<JsonPropertyName("edges")>]
+    Edges: obj list
+}
+
+type MediaNode = {
+    [<JsonPropertyName("__typename")>]
+    TypeName: string
+    [<JsonPropertyName("id")>]
+    Id: string
+    [<JsonPropertyName("shortcode")>]
+    Shortcode: string
+    [<JsonPropertyName("dimensions")>]
+    Dimensions: Dimension
+    [<JsonPropertyName("gating_info")>]
+    GatingInfo: obj option
+    [<JsonPropertyName("fact_check_overall_rating")>]
+    FactCheckOverallRating: obj option
+    [<JsonPropertyName("fact_check_information")>]
+    FactCheckInformation: obj option
+    [<JsonPropertyName("sensitivity_friction_info")>]
+    SensitivityFrictionInfo: obj option
+    [<JsonPropertyName("sharing_friction_info")>]
+    SharingFrictionInfo: SharingFrictionInfo
+    [<JsonPropertyName("media_overlay_info")>]
+    MediaOverlayInfo: obj option
+    [<JsonPropertyName("media_preview")>]
+    MediaPreview: string option
+    [<JsonPropertyName("display_url")>]
+    DisplayUrl: string
+    [<JsonPropertyName("display_resources")>]
+    DisplayResources: DisplayResource list
+    [<JsonPropertyName("accessibility_caption")>]
+    AccessibilityCaption: string option
+    [<JsonPropertyName("is_video")>]
+    IsVideo: bool
+    [<JsonPropertyName("tracking_token")>]
+    TrackingToken: string
+    [<JsonPropertyName("upcoming_event")>]
+    UpcomingEvent: obj option
+    [<JsonPropertyName("edge_media_to_tagged_user")>]
+    EdgeMediaToTaggedUser: TaggedUserEdge
+}
+
+type Edge = {
+    [<JsonPropertyName("node")>]
+    Node: MediaNode
+}
+
+type EdgeSidecarToChildren = {
+    [<JsonPropertyName("edges")>]
+    Edges: Edge list
+}
 
 [<CLIMutable>]
 type CaptionNode = {
@@ -50,6 +128,8 @@ type InstagramXdt = {
     IsVideo: bool
     [<JsonPropertyName("edge_media_to_caption")>]
     EdgeMediaToCaption: EdgeMediaToCaption
+    [<JsonPropertyName("edge_sidecar_to_children")>]
+    EdgeSidecarToChildren: EdgeSidecarToChildren
 }
 
 type Data = {
@@ -102,33 +182,51 @@ let private getMediaIdRequest reelsId =
     headers |> Seq.iter (fun kvp -> requestMessage.Headers.TryAddWithoutValidation(kvp.Key, kvp.Value) |> ignore)
     requestMessage
 
+let private mapSingleDisplay (edge: Edge) =
+    let node = edge.Node
+    match node.IsVideo with
+    | true ->
+        let fileName = $"igv_{Guid.NewGuid()}.mp4"
+        downloadFileAsync node.DisplayUrl fileName |> Async.RunSynchronously
+        Video fileName
+    | false ->
+        let fileName = $"igp_{Guid.NewGuid()}.jpeg"
+        downloadFileAsync node.DisplayUrl fileName |> Async.RunSynchronously
+        Photo fileName
+
+let downloadReel rId = 
+    let fileName = $"ig_{rId}_{Guid.NewGuid()}.mp4"
+    use mediaIdRequest = getMediaIdRequest rId
+    use client = new HttpClient()
+    let mediaIdResponse = executeWithPolicyAsync (client.SendAsync mediaIdRequest |> Async.AwaitTask) |> Async.RunSynchronously
+    let apiResponse = mediaIdResponse.Content.ReadFromJsonAsync<InstagramMediaResponse>().Result
+    apiResponse.Data
+    |> Option.bind (_.InstagramXdt)
+    |> Option.bind (_.VideoUrl)
+    |> Option.map (fun vUrl ->
+        downloadFileAsync vUrl fileName |> Async.RunSynchronously
+        Reply.createVideoFile fileName)
+    |> Option.defaultValue(Reply.createMessage "Wasn't able to download video")
+
+let downloadPost pId =
+    use mediaIdRequest = getMediaIdRequest pId
+    use client = new HttpClient()
+    let mediaIdResponse = executeWithPolicyAsync (client.SendAsync mediaIdRequest |> Async.AwaitTask) |> Async.RunSynchronously
+    // let apiTextResponse = mediaIdResponse.Content.ReadAsStringAsync CancellationToken.None |> Async.AwaitTask |> Async.RunSynchronously
+    let apiResponse = mediaIdResponse.Content.ReadFromJsonAsync<InstagramMediaResponse>().Result
+    apiResponse.Data
+    |> Option.bind (_.InstagramXdt)
+    |> Option.map (fun data ->
+        let gallery = data.EdgeSidecarToChildren.Edges |> Seq.map mapSingleDisplay |> Seq.toList
+        Reply.createImageGallery gallery (Some data.EdgeMediaToCaption.Edges.Head.Node.Text))
+    |> Option.defaultValue(Reply.createMessage "Wasn't able to download post")
+
 let getInstagramReply (url: string) =
     match extractReelId url with
         | Reel rId ->
-            let fileName = $"ig_{rId}_{Guid.NewGuid()}.mp4"
-            use mediaIdRequest = getMediaIdRequest rId
-            use client = new HttpClient()
-            let mediaIdResponse = executeWithPolicyAsync (client.SendAsync mediaIdRequest |> Async.AwaitTask) |> Async.RunSynchronously
-            let apiResponse = mediaIdResponse.Content.ReadFromJsonAsync<InstagramMediaResponse>().Result
-            apiResponse.Data
-            |> Option.bind (_.InstagramXdt)
-            |> Option.bind (_.VideoUrl)
-            |> Option.map (fun vUrl ->
-                downloadFileAsync vUrl fileName |> Async.RunSynchronously
-                Reply.createVideoFile fileName)
+           Some (downloadReel rId)
         | Post pId ->
-            let fileName = $"ig_{pId}_{Guid.NewGuid()}.mp4"
-            use mediaIdRequest = getMediaIdRequest pId
-            use client = new HttpClient()
-            let mediaIdResponse = executeWithPolicyAsync (client.SendAsync mediaIdRequest |> Async.AwaitTask) |> Async.RunSynchronously
-            let apiTextResponse = mediaIdResponse.Content.ReadAsStringAsync CancellationToken.None |> Async.AwaitTask |> Async.RunSynchronously
-            let apiResponse = mediaIdResponse.Content.ReadFromJsonAsync<InstagramMediaResponse>().Result
-            apiResponse.Data
-            |> Option.bind (_.InstagramXdt)
-            |> Option.map (fun data ->
-                downloadFileAsync data.ImageUrl.Value fileName |> Async.RunSynchronously
-                Reply.createImageGallery [fileName] (Some data.EdgeMediaToCaption.Edges.Head.Node.Text))
-            
-        | Nothing -> None
+           Some (downloadPost pId)
+        | Nothing -> Some (Reply.createMessage "Wasn't able to extract post id")
 
 let getInstagramLinks (_: string option) = getLinks mergedRegex

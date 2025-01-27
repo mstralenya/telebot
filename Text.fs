@@ -9,8 +9,12 @@ type VideoFile = {
     Caption: string option
 }
 
+type GalleryDisplay =
+    | Photo of string
+    | Video of string
+
 type ImageGallery = {
-    Photos: string list
+    Photos: GalleryDisplay list
     Caption: string option
 }
 
