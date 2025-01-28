@@ -1,31 +1,24 @@
 ﻿module Telebot.Instagram
 
-open System.Net.Http.Json
-open System.Text.RegularExpressions
 open System
+open System.IO
 open System.Net.Http
+open System.Net.Http.Json
+open System.Text.Json
 open System.Text.Json.Serialization
+open System.Text.RegularExpressions
 open System.Collections.Generic
-open System.Threading
 open Telebot.Policies
 open Telebot.Text
 open Telebot.VideoDownloader
-open System.Text.Json
-open System.IO
 
 type PostType =
     | Reel of string
     | Post of string
     | Nothing
 
-open System.Text.Json.Serialization
-
-type Dimension = {
-    [<JsonPropertyName("height")>]
-    Height: int
-    [<JsonPropertyName("width")>]
-    Width: int
-}
+[<Struct>]
+type Dimension = { Height: int; Width: int }
 
 type SharingFrictionInfo = {
     [<JsonPropertyName("should_have_sharing_friction")>]
@@ -113,12 +106,6 @@ type CaptionEdge = {
     Node: CaptionNode
 }
 
-[<CLIMutable>]
-type EdgeMediaToCaption = {
-    [<JsonPropertyName("edges")>]
-    Edges: CaptionEdge list
-}
-
 type InstagramXdt = {
     [<JsonPropertyName("video_url")>]
     VideoUrl: string option
@@ -127,9 +114,9 @@ type InstagramXdt = {
     [<JsonPropertyName("is_video")>]
     IsVideo: bool
     [<JsonPropertyName("edge_media_to_caption")>]
-    EdgeMediaToCaption: EdgeMediaToCaption
+    EdgeMediaToCaption: {| Edges: CaptionEdge list |}
     [<JsonPropertyName("edge_sidecar_to_children")>]
-    EdgeSidecarToChildren: EdgeSidecarToChildren
+    EdgeSidecarToChildren: EdgeSidecarToChildren option
 }
 
 type Data = {
@@ -142,91 +129,100 @@ type InstagramMediaResponse = {
     Data: Data option
 }
 
-let private loadJsonFromFile<'T> (filePath: string) =
-    let json = File.ReadAllText(filePath)
-    JsonSerializer.Deserialize<'T>(json)
+module Async =
+    let map f computation =
+        async.Bind(computation, f >> async.Return)
 
-let private headers = 
-    loadJsonFromFile<Dictionary<string, string>>("igHeaders.json")
+module private Impl =
+    let loadJson<'T> path = 
+        File.ReadAllText path |> JsonSerializer.Deserialize<'T>
+    
+    let headers = loadJson<Dictionary<string, string>> "igHeaders.json"
+    let urlContent = loadJson<KeyValuePair<string, string> list> "igUrlContent.json"
+    let postRegex = Regex (@"/(?:reels?|p)/([\w-]+)/?", RegexOptions.Compiled)
+    
+    let (|PostType|_|) url =
+        postRegex.Match(url).Groups
+        |> Seq.tryLast
+        |> Option.map (fun g -> g.Value)
+        |> function
+            | Some id when url.Contains("/reel") -> Some (Reel id)
+            | Some id -> Some (Post id)
+            | _ -> None
+    
+    let getContentPostId postId =
+        KeyValuePair("variables", $"{{\"shortcode\":\"{postId}\",\"fetch_comment_count\":null}}")
+    
+    let createRequest postId =
+        let content = urlContent @ [getContentPostId postId]
+        let request = new HttpRequestMessage(HttpMethod.Post, "https://www.instagram.com/api/graphql")
+        request.Content <- new FormUrlEncodedContent(content)
+        headers |> Seq.iter (fun kv -> request.Headers.Add(kv.Key, kv.Value))
+        request
+    
+    let fetchMediaData postId = async {
+        use client = new HttpClient()
+        use request = createRequest postId
+        let! response = executeWithPolicyAsync (client.SendAsync request |> Async.AwaitTask)
+        return! response.Content.ReadFromJsonAsync<InstagramMediaResponse>() |> Async.AwaitTask
+    }
+    
+    let downloadMedia url fileName = async {
+        do! downloadFileAsync url fileName
+        return if fileName.Contains("igv_") then Video fileName else Photo fileName
+    }
+    
+    let getCaption (xdt: InstagramXdt) =
+        xdt.EdgeMediaToCaption.Edges
+        |> List.tryHead
+        |> Option.map (fun e -> e.Node.Text)
+        |> Option.defaultValue ""
 
-let private urlContent = 
-    loadJsonFromFile<KeyValuePair<string, string>[]>("igUrlContent.json")
-    |> Array.toList
+open Impl
 
-let private igReelRegex = Regex(@"(?:https?:\/\/(?:www\.)?instagram\.com\/(?:[^\/]+\/)?(?:reels?)\/)([\w-]+)", RegexOptions.Compiled)
-let private igPostRegex = Regex(@"(?:https?:\/\/(?:www\.)?instagram\.com\/(?:[^\/]+\/)?(?:p?)\/)([\w-]+)", RegexOptions.Compiled)
-let private mergedRegex = Regex($"{igReelRegex}|{igPostRegex}", RegexOptions.Compiled)
+let private downloadReel rId = async {
+    let fileName = $"igv_{Guid.NewGuid()}.mp4"
+    let! media = fetchMediaData rId
+    return!
+        media.Data
+        |> Option.bind (_.InstagramXdt)
+        |> Option.bind (_.VideoUrl)
+        |> function
+            | Some url -> 
+                downloadMedia url fileName
+                |> Async.map (Reply.createVideoFile << fun _ -> fileName)
+            | None -> async { return Reply.createMessage "Failed to download reel" }
+}
 
-let private (|RegexMatch|_|) (regex: Regex) input =
-    let m = regex.Match(input)
-    if m.Success && m.Groups.Count > 1 then
-        Some m.Groups.[1].Value
-    else
-        None
+let private downloadPost pId = async {
+    let! media = fetchMediaData pId
+    match media.Data |> Option.bind (fun d -> d.InstagramXdt) with
+    | Some xdt ->
+        let! mediaItems =
+            match xdt.EdgeSidecarToChildren with
+            | Some { Edges = edges } when not edges.IsEmpty ->
+                edges
+                |> List.map (fun e -> downloadMedia e.Node.DisplayUrl $"ig_{Guid.NewGuid()}.mp4")
+                |> Async.Parallel
+            | _ ->
+                let url = if xdt.IsVideo then xdt.VideoUrl else xdt.ImageUrl
+                match url with
+                | Some u -> [| downloadMedia u $"""ig_{Guid.NewGuid()}.{(if xdt.IsVideo then "mp4" else "jpg")}""" |]
+                | None -> [||]
+                |> Async.Parallel
+        
+        return Reply.createImageGallery (List.ofArray mediaItems) (Some (getCaption xdt))
+    | None ->
+        return Reply.createMessage "Failed to download post"
+}
 
+let getInstagramReply url =
+    async {
+        match url with
+        | PostType (Reel id) -> return! downloadReel id
+        | PostType (Post id) -> return! downloadPost id
+        | _ -> return Reply.createMessage "Invalid Instagram URL"
+    }
+    |> Async.RunSynchronously |> Some
 
-let private extractReelId url =
-    match url with
-    | RegexMatch igReelRegex id -> Reel id
-    | RegexMatch igPostRegex id -> Post id
-    | _ -> Nothing
-
-let private getContentPostId postId =
-    KeyValuePair("variables", $"{{\"shortcode\":\"{postId}\",\"fetch_comment_count\":null,\"fetch_related_profile_media_count\":null,\"parent_comment_count\":null,\"child_comment_count\":null,\"fetch_like_count\":null,\"fetch_tagged_user_count\":null,\"fetch_preview_comment_count\":null,\"has_threaded_comments\":false,\"hoisted_comment_id\":null,\"hoisted_reply_id\":null}}")
-
-let private getMediaIdRequest reelsId =
-    let nameValues = urlContent @ [getContentPostId reelsId]
-    let encodedData = new FormUrlEncodedContent(nameValues)
-    let requestMessage = new HttpRequestMessage(HttpMethod.Post, Uri("https://www.instagram.com/api/graphql"))
-    requestMessage.Content <- encodedData
-    headers |> Seq.iter (fun kvp -> requestMessage.Headers.TryAddWithoutValidation(kvp.Key, kvp.Value) |> ignore)
-    requestMessage
-
-let private mapSingleDisplay (edge: Edge) =
-    let node = edge.Node
-    match node.IsVideo with
-    | true ->
-        let fileName = $"igv_{Guid.NewGuid()}.mp4"
-        downloadFileAsync node.DisplayUrl fileName |> Async.RunSynchronously
-        Video fileName
-    | false ->
-        let fileName = $"igp_{Guid.NewGuid()}.jpeg"
-        downloadFileAsync node.DisplayUrl fileName |> Async.RunSynchronously
-        Photo fileName
-
-let downloadReel rId = 
-    let fileName = $"ig_{rId}_{Guid.NewGuid()}.mp4"
-    use mediaIdRequest = getMediaIdRequest rId
-    use client = new HttpClient()
-    let mediaIdResponse = executeWithPolicyAsync (client.SendAsync mediaIdRequest |> Async.AwaitTask) |> Async.RunSynchronously
-    let apiResponse = mediaIdResponse.Content.ReadFromJsonAsync<InstagramMediaResponse>().Result
-    apiResponse.Data
-    |> Option.bind (_.InstagramXdt)
-    |> Option.bind (_.VideoUrl)
-    |> Option.map (fun vUrl ->
-        downloadFileAsync vUrl fileName |> Async.RunSynchronously
-        Reply.createVideoFile fileName)
-    |> Option.defaultValue(Reply.createMessage "Wasn't able to download video")
-
-let downloadPost pId =
-    use mediaIdRequest = getMediaIdRequest pId
-    use client = new HttpClient()
-    let mediaIdResponse = executeWithPolicyAsync (client.SendAsync mediaIdRequest |> Async.AwaitTask) |> Async.RunSynchronously
-    // let apiTextResponse = mediaIdResponse.Content.ReadAsStringAsync CancellationToken.None |> Async.AwaitTask |> Async.RunSynchronously
-    let apiResponse = mediaIdResponse.Content.ReadFromJsonAsync<InstagramMediaResponse>().Result
-    apiResponse.Data
-    |> Option.bind (_.InstagramXdt)
-    |> Option.map (fun data ->
-        let gallery = data.EdgeSidecarToChildren.Edges |> Seq.map mapSingleDisplay |> Seq.toList
-        Reply.createImageGallery gallery (Some data.EdgeMediaToCaption.Edges.Head.Node.Text))
-    |> Option.defaultValue(Reply.createMessage "Wasn't able to download post")
-
-let getInstagramReply (url: string) =
-    match extractReelId url with
-        | Reel rId ->
-           Some (downloadReel rId)
-        | Post pId ->
-           Some (downloadPost pId)
-        | Nothing -> Some (Reply.createMessage "Wasn't able to extract post id")
-
-let getInstagramLinks (_: string option) = getLinks mergedRegex
+let getInstagramLinks (_: string option) = getLinks postRegex
