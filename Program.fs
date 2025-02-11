@@ -78,18 +78,29 @@ let reply (reply: Reply, messageId: MessageId, chatId: ChatId, ctx: UpdateContex
                             ?caption = imageGallery.Caption
                         ))
                 )
+            |> Seq.chunkBySize 10
             |> Seq.toArray
 
-        let req =
-            Req.SendMediaGroup.Make(
-                chatId,
-                gallery,
-                disableNotification = true,
-                replyParameters = ReplyParameters.Create(messageId.MessageId, chatId)
+        let sendRequestsInOrder (requests: seq<Async<unit>>) =
+            requests
+            |> Seq.toList
+            |> List.iter (fun request -> request |> Async.RunSynchronously)
+        
+        let replies =
+            gallery
+            |> Seq.map (fun g ->
+                Req.SendMediaGroup.Make(
+                    chatId,
+                    g,
+                    disableNotification = true,
+                    replyParameters = ReplyParameters.Create(messageId.MessageId, chatId)
+                )
             )
-
-        sendRequestAsync req ctx |> Async.RunSynchronously
+            |> Seq.map (fun r -> sendRequestAsync r ctx)
+            |> sendRequestsInOrder
+        
         imageGallery.Photos |> Seq.map(string) |> Seq.iter deleteFile
+        
     | Message message ->
         let req =
             Req.SendMessage.Make(chatId, message, replyParameters = ReplyParameters.Create(messageId.MessageId, chatId))

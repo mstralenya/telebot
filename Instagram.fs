@@ -5,9 +5,10 @@ open System.IO
 open System.Net.Http
 open System.Net.Http.Json
 open System.Text.Json
-open System.Text.Json.Serialization
 open System.Text.RegularExpressions
 open System.Collections.Generic
+open System.Threading
+open Telebot.InstagramData
 open Telebot.Policies
 open Telebot.Text
 open Telebot.VideoDownloader
@@ -16,118 +17,6 @@ type PostType =
     | Reel of string
     | Post of string
     | Nothing
-
-[<Struct>]
-type Dimension = { Height: int; Width: int }
-
-type SharingFrictionInfo = {
-    [<JsonPropertyName("should_have_sharing_friction")>]
-    ShouldHaveSharingFriction: bool
-    [<JsonPropertyName("bloks_app_url")>]
-    BloksAppUrl: string option
-}
-
-type DisplayResource = {
-    [<JsonPropertyName("src")>]
-    SourceUrl: string
-    [<JsonPropertyName("config_width")>]
-    ConfigWidth: int
-    [<JsonPropertyName("config_height")>]
-    ConfigHeight: int
-}
-
-type TaggedUserEdge = {
-    [<JsonPropertyName("edges")>]
-    Edges: obj list
-}
-
-type MediaNode = {
-    [<JsonPropertyName("__typename")>]
-    TypeName: string
-    [<JsonPropertyName("id")>]
-    Id: string
-    [<JsonPropertyName("shortcode")>]
-    Shortcode: string
-    [<JsonPropertyName("dimensions")>]
-    Dimensions: Dimension
-    [<JsonPropertyName("gating_info")>]
-    GatingInfo: obj option
-    [<JsonPropertyName("fact_check_overall_rating")>]
-    FactCheckOverallRating: obj option
-    [<JsonPropertyName("fact_check_information")>]
-    FactCheckInformation: obj option
-    [<JsonPropertyName("sensitivity_friction_info")>]
-    SensitivityFrictionInfo: obj option
-    [<JsonPropertyName("sharing_friction_info")>]
-    SharingFrictionInfo: SharingFrictionInfo
-    [<JsonPropertyName("media_overlay_info")>]
-    MediaOverlayInfo: obj option
-    [<JsonPropertyName("media_preview")>]
-    MediaPreview: string option
-    [<JsonPropertyName("display_url")>]
-    DisplayUrl: string
-    [<JsonPropertyName("display_resources")>]
-    DisplayResources: DisplayResource list
-    [<JsonPropertyName("accessibility_caption")>]
-    AccessibilityCaption: string option
-    [<JsonPropertyName("is_video")>]
-    IsVideo: bool
-    [<JsonPropertyName("tracking_token")>]
-    TrackingToken: string
-    [<JsonPropertyName("upcoming_event")>]
-    UpcomingEvent: obj option
-    [<JsonPropertyName("edge_media_to_tagged_user")>]
-    EdgeMediaToTaggedUser: TaggedUserEdge
-}
-
-type Edge = {
-    [<JsonPropertyName("node")>]
-    Node: MediaNode
-}
-
-type EdgeSidecarToChildren = {
-    [<JsonPropertyName("edges")>]
-    Edges: Edge list
-}
-
-[<CLIMutable>]
-type CaptionNode = {
-    [<JsonPropertyName("created_at")>]
-    CreatedAt: string
-    [<JsonPropertyName("text")>]
-    Text: string
-    [<JsonPropertyName("id")>]
-    Id: string
-}
-
-[<CLIMutable>]
-type CaptionEdge = {
-    [<JsonPropertyName("node")>]
-    Node: CaptionNode
-}
-
-type InstagramXdt = {
-    [<JsonPropertyName("video_url")>]
-    VideoUrl: string option
-    [<JsonPropertyName("display_url")>]
-    ImageUrl: string option
-    [<JsonPropertyName("is_video")>]
-    IsVideo: bool
-    [<JsonPropertyName("edge_media_to_caption")>]
-    EdgeMediaToCaption: {| Edges: CaptionEdge list |}
-    [<JsonPropertyName("edge_sidecar_to_children")>]
-    EdgeSidecarToChildren: EdgeSidecarToChildren option
-}
-
-type Data = {
-    [<JsonPropertyName("xdt_shortcode_media")>]
-    InstagramXdt: InstagramXdt option
-}
-
-type InstagramMediaResponse = {
-    [<JsonPropertyName("data")>]
-    Data: Data option
-}
 
 module Async =
     let map f computation =
@@ -144,7 +33,7 @@ module private Impl =
     let (|PostType|_|) url =
         postRegex.Match(url).Groups
         |> Seq.tryLast
-        |> Option.map (fun g -> g.Value)
+        |> Option.map (_.Value)
         |> function
             | Some id when url.Contains("/reel") -> Some (Reel id)
             | Some id -> Some (Post id)
@@ -164,18 +53,20 @@ module private Impl =
         use client = new HttpClient()
         use request = createRequest postId
         let! response = executeWithPolicyAsync (client.SendAsync request |> Async.AwaitTask)
+        let r = response.Content.ReadAsStringAsync CancellationToken.None |> Async.AwaitTask |> Async.RunSynchronously
         return! response.Content.ReadFromJsonAsync<InstagramMediaResponse>() |> Async.AwaitTask
     }
     
-    let downloadMedia url fileName = async {
+    let downloadMedia url isVideo = async {
+        let fileName = $"""ig_{Guid.NewGuid()}.{(if isVideo then "mp4" else "jpg")}"""
         do! downloadFileAsync url fileName
-        return if fileName.Contains("igv_") then Video fileName else Photo fileName
+        return if isVideo then Video fileName else Photo fileName
     }
     
     let getCaption (xdt: InstagramXdt) =
         xdt.EdgeMediaToCaption.Edges
         |> List.tryHead
-        |> Option.map (fun e -> e.Node.Text)
+        |> Option.map (_.Node.Text)
         |> Option.defaultValue ""
 
 open Impl
@@ -189,7 +80,7 @@ let private downloadReel rId = async {
         |> Option.bind (_.VideoUrl)
         |> function
             | Some url -> 
-                downloadMedia url fileName
+                downloadMedia url true
                 |> Async.map (Reply.createVideoFile << fun _ -> fileName)
             | None -> async { return Reply.createMessage "Failed to download reel" }
 }
@@ -202,12 +93,14 @@ let private downloadPost pId = async {
             match xdt.EdgeSidecarToChildren with
             | Some { Edges = edges } when not edges.IsEmpty ->
                 edges
-                |> List.map (fun e -> downloadMedia e.Node.DisplayUrl $"ig_{Guid.NewGuid()}.mp4")
+                |> List.map (fun e ->
+                    let downloadUrl = if e.Node.IsVideo then e.Node.VideoUrl else e.Node.DisplayUrl
+                    downloadMedia downloadUrl e.Node.IsVideo )
                 |> Async.Parallel
             | _ ->
                 let url = if xdt.IsVideo then xdt.VideoUrl else xdt.ImageUrl
                 match url with
-                | Some u -> [| downloadMedia u $"""ig_{Guid.NewGuid()}.{(if xdt.IsVideo then "mp4" else "jpg")}""" |]
+                | Some u -> [| downloadMedia u xdt.IsVideo |]
                 | None -> [||]
                 |> Async.Parallel
         
