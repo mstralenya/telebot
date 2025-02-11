@@ -72,16 +72,15 @@ module private Impl =
 open Impl
 
 let private downloadReel rId = async {
-    let fileName = $"igv_{Guid.NewGuid()}.mp4"
     let! media = fetchMediaData rId
     return!
         media.Data
         |> Option.bind (_.InstagramXdt)
         |> Option.bind (_.VideoUrl)
         |> function
-            | Some url -> 
-                downloadMedia url true
-                |> Async.map (Reply.createVideoFile << fun _ -> fileName)
+            | Some url ->
+                let gallery = [|downloadMedia url true|] |> Async.Parallel |> Async.RunSynchronously |> List.ofArray
+                async { return Reply.createImageGallery gallery None }
             | None -> async { return Reply.createMessage "Failed to download reel" }
 }
 
