@@ -17,6 +17,16 @@ open Telebot.Instagram
 
 let sendRequestAsync (req: 'TReq) (ctx: UpdateContext) = req |> api ctx.Config |> Async.Ignore
 
+let truncateWithEllipsis (input: string option) (maxLength: int) : string option =
+    match input with
+    | Some str ->
+        if str.Length <= maxLength then
+            Some str
+        else
+            let truncated = str.Substring(0, maxLength - 3)
+            Some (truncated + "...")
+    | None -> None
+
 let reply (reply: Reply, messageId: MessageId, chatId: ChatId, ctx: UpdateContext) =
     match reply with
     | VideoFile videoFile ->
@@ -39,6 +49,8 @@ let reply (reply: Reply, messageId: MessageId, chatId: ChatId, ctx: UpdateContex
                 | None -> (None, None, None)
 
             let thumbFile = InputFile.File(thumbnailFilename, File.OpenRead(thumbnailFilename))
+            
+            let caption = truncateWithEllipsis rt 1024
 
             let req =
                 Req.SendVideo.Make(
@@ -53,7 +65,7 @@ let reply (reply: Reply, messageId: MessageId, chatId: ChatId, ctx: UpdateContex
                     ?width = width,
                     ?height = height,
                     ?duration = duration,
-                    ?caption = rt
+                    ?caption = caption
                 )
 
             sendRequestAsync req ctx |> Async.RunSynchronously
@@ -62,20 +74,21 @@ let reply (reply: Reply, messageId: MessageId, chatId: ChatId, ctx: UpdateContex
         let gallery =
             imageGallery.Photos
             |> Seq.map (fun g ->
+                let caption = truncateWithEllipsis imageGallery.Caption 1024
                 match g with
                 | Photo p -> 
                     InputMedia.Photo(
                         InputMediaPhoto.Create(
                             "photo",
                             InputFile.File(p, File.OpenRead(p)),
-                            ?caption = imageGallery.Caption
+                            ?caption = caption
                         ))
                 | Video v ->
                     InputMedia.Video(
                         InputMediaVideo.Create(
                             "video",
                             InputFile.File(v, File.OpenRead(v)),
-                            ?caption = imageGallery.Caption
+                            ?caption = caption
                         ))
                 )
             |> Seq.chunkBySize 10
