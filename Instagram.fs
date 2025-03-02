@@ -29,6 +29,7 @@ module private Impl =
     let headers = loadJson<Dictionary<string, string>> "igHeaders.json"
     let urlContent = loadJson<KeyValuePair<string, string> list> "igUrlContent.json"
     let postRegex = Regex (@"/(?:reels?|p)/([\w-]+)/?", RegexOptions.Compiled)
+    let shareRegex = Regex(@"https://www\.instagram\.com/share/([a-zA-Z0-9]+)/?", RegexOptions.Compiled)
     
     let (|PostType|_|) url =
         postRegex.Match(url).Groups
@@ -70,6 +71,18 @@ module private Impl =
         |> Option.defaultValue ""
 
 open Impl
+
+let private getRealInstagramUrl (shareUrl: string) =
+    async {
+        use httpClient = new HttpClient()
+        httpClient.DefaultRequestHeaders.UserAgent.ParseAdd("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.3")
+        let! response = httpClient.GetAsync(shareUrl) |> Async.AwaitTask
+        if response.IsSuccessStatusCode then
+            let realUrl = response.RequestMessage.RequestUri.ToString()
+            return realUrl
+        else
+            return "Failed to retrieve the real URL."
+    }
 
 let private downloadReel rId = async {
     let! media = fetchMediaData rId
@@ -116,5 +129,10 @@ let getInstagramReply url =
         | _ -> return Reply.createMessage "Invalid Instagram URL"
     }
     |> Async.RunSynchronously |> Some
+    
+let getInstagramShareReply url =
+    let realUrl = getRealInstagramUrl url |> Async.RunSynchronously
+    getInstagramReply realUrl
 
 let getInstagramLinks (_: string option) = getLinks postRegex
+let getInstagramShareLinks (_: string option) = getLinks shareRegex

@@ -133,6 +133,7 @@ let processLinks getLinks processVideo = processVideos getLinks processVideo
 
 let processTikTokVideos = processLinks getTikTokLinks getTikTokReply
 let processInstagramLinks = processLinks getInstagramLinks getInstagramReply
+let processInstagramShareLinks = processLinks getInstagramShareLinks getInstagramShareReply
 let processTwitterLinks = processLinks getTwitterLinks getTwitterReply
 let processYoutubeLinks = processLinks getYoutubeLinks getYoutubeReply
 
@@ -159,6 +160,7 @@ let updateArrived (ctx: UpdateContext) =
 
         [ processTikTokVideos
           processInstagramLinks
+          processInstagramShareLinks
           processTwitterLinks
           processYoutubeLinks ]
         |> List.iter (fun processMessage -> tryThreeTimes (fun () -> processMessage (messageText, mId, cId, ctx)))
