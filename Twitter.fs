@@ -94,9 +94,8 @@ let getTwitterReply (url: string) =
     let tweet = getTweetFromUrlAsync url |> Async.RunSynchronously
     let replyText =
         match tweet.user_screen_name, tweet.user_name, tweet.text with
-        | a, ah, Some t -> Some $"<b>{a}</b> <i>(@​{ah})</i>: <blockquote>{t}</blockquote>"
-        | a, ah, _ -> Some $"<b>{a}</b> <i>(@​{ah})</i>:"
-        
+        | ah, a, Some t -> Some $"<b>{a}</b> <i>(@​{ah})</i>: <blockquote>{t}</blockquote>"
+        | ah, a, _ -> Some $"<b>{a}</b> <i>(@​{ah})</i>:"
     let gallery = processUrls tweet.mediaURLs
     match gallery.Length with
     | i when i > 0 -> Some (Reply.createGallery gallery replyText)
