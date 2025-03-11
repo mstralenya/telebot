@@ -81,14 +81,16 @@ let reply (reply: Reply, messageId: MessageId, chatId: ChatId, ctx: UpdateContex
                         InputMediaPhoto.Create(
                             "photo",
                             InputFile.File(p, File.OpenRead(p)),
-                            ?caption = caption
+                            ?caption = caption,
+                            ?parseMode = Some ParseMode.HTML
                         ))
                 | Video v ->
                     InputMedia.Video(
                         InputMediaVideo.Create(
                             "video",
                             InputFile.File(v, File.OpenRead(v)),
-                            ?caption = caption
+                            ?caption = caption,
+                            ?parseMode = Some ParseMode.HTML
                         ))
                 )
             |> Seq.chunkBySize 10
@@ -117,7 +119,7 @@ let reply (reply: Reply, messageId: MessageId, chatId: ChatId, ctx: UpdateContex
         
     | Message message ->
         let req =
-            Req.SendMessage.Make(chatId, message, replyParameters = ReplyParameters.Create(messageId.MessageId, chatId))
+            Req.SendMessage.Make(chatId, message, replyParameters = ReplyParameters.Create(messageId.MessageId, chatId), parseMode = ParseMode.HTML)
 
         sendRequestAsync req ctx |> Async.Start
 
