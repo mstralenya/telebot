@@ -93,7 +93,7 @@ let private downloadReel rId = async {
         |> function
             | Some url ->
                 let gallery = [|downloadMedia url true|] |> Async.Parallel |> Async.RunSynchronously |> List.ofArray
-                async { return Reply.createImageGallery gallery None }
+                async { return Reply.createGallery gallery None }
             | None -> async { return Reply.createMessage "Failed to download reel" }
 }
 
@@ -116,7 +116,7 @@ let private downloadPost pId = async {
                 | None -> [||]
                 |> Async.Parallel
         
-        return Reply.createImageGallery (List.ofArray mediaItems) (Some (getCaption xdt))
+        return Reply.createGallery (List.ofArray mediaItems) (Some (getCaption xdt))
     | None ->
         return Reply.createMessage "Failed to download post"
 }

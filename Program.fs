@@ -70,9 +70,9 @@ let reply (reply: Reply, messageId: MessageId, chatId: ChatId, ctx: UpdateContex
 
             sendRequestAsync req ctx |> Async.RunSynchronously
             [thumbnailFilename; videoFile.File] |> Seq.iter deleteFile
-    | ImageGallery imageGallery ->
+    | Gallery imageGallery ->
         let gallery =
-            imageGallery.Photos
+            imageGallery.Media
             |> Seq.map (fun g ->
                 let caption = truncateWithEllipsis imageGallery.Caption 1024
                 match g with
@@ -109,10 +109,11 @@ let reply (reply: Reply, messageId: MessageId, chatId: ChatId, ctx: UpdateContex
                     replyParameters = ReplyParameters.Create(messageId.MessageId, chatId)
                 )
             )
-            |> Seq.map (fun r -> sendRequestAsync r ctx)
+            |> Seq.map (fun r ->
+                sendRequestAsync r ctx)
             |> sendRequestsInOrder
         
-        imageGallery.Photos |> Seq.map(string) |> Seq.iter deleteFile
+        imageGallery.Media |> Seq.map(string) |> Seq.iter deleteFile
         
     | Message message ->
         let req =

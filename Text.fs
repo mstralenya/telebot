@@ -1,7 +1,6 @@
 ﻿module Telebot.Text
 
 open System.Text.RegularExpressions
-open YoutubeExplode.Common
 
 /// Represents a video file with optional metadata.
 type VideoFile = {
@@ -13,15 +12,15 @@ type GalleryDisplay =
     | Photo of string
     | Video of string
 
-type ImageGallery = {
-    Photos: GalleryDisplay list
+type Gallery = {
+    Media: GalleryDisplay list
     Caption: string option
 }
 
 /// Represents a reply that can be either a video file or a text message.
 type Reply =
     | VideoFile of VideoFile
-    | ImageGallery of ImageGallery
+    | Gallery of Gallery
     | Message of string
 
 module Reply =
@@ -33,8 +32,8 @@ module Reply =
     
     let createVideoFile file= createVideoFileWithCaption file None
     
-    let createImageGallery files caption = ImageGallery {
-        Photos = files
+    let createGallery files caption = Gallery {
+        Media = files
         Caption = caption
     }
 

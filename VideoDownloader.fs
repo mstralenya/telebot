@@ -2,7 +2,6 @@
 
 open System.IO
 open System.Net.Http
-open System.Threading.Tasks
 open Telebot.Policies
 
 let downloadFileAsync(url: string) (filePath: string) =
