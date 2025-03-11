@@ -98,7 +98,8 @@ let getTwitterReply (url: string) =
         | a, ah, _ -> Some $"{a} (@​{ah})"
         
     let gallery = processUrls tweet.mediaURLs
-    let reply = Reply.createGallery gallery replyText
-    Some reply
+    match gallery.Length with
+    | i when i > 0 -> Some (Reply.createGallery gallery replyText)
+    | _ -> Some (Reply.createMessage replyText.Value)
 
 let getTwitterLinks (_: string option) = getLinks twitterRegex
