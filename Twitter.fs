@@ -15,12 +15,38 @@ type Size = {
 }
 
 type MediaExtended = {
-    altText: string
+    altText: string option
     size: Size
     thumbnail_url: string
     mediaType: string
     url: string
-    duration_millis: int option
+}
+
+type Qrt = {
+    allSameType: bool
+    article: string option
+    combinedMediaUrl: string option
+    communityNote: string option
+    conversationID: string
+    date: string
+    date_epoch: int64
+    hasMedia: bool
+    hashtags: string list
+    lang: string
+    likes: int
+    mediaURLs: string list
+    media_extended: MediaExtended list
+    pollData: string option
+    possibly_sensitive: bool
+    qrtURL: string
+    replies: int
+    retweets: int
+    text: string option
+    tweetID: string
+    tweetURL: string
+    user_name: string
+    user_profile_image_url: string
+    user_screen_name: string
 }
 
 type Tweet = {
@@ -29,14 +55,20 @@ type Tweet = {
     likes: int
     mediaURLs: string list
     media_extended: MediaExtended list
+    pollData: string option
+    possibly_sensitive: bool
+    qrt: Qrt option
+    qrtURL: string
     replies: int
     retweets: int
     text: string option
     tweetID: string
     tweetURL: string
     user_name: string
+    user_profile_image_url: string
     user_screen_name: string
 }
+
 
 // Function to replace the domain in the URL
 let replaceDomain (url: string) =
@@ -90,13 +122,27 @@ let processUrls (urls: string list) =
     |> Async.RunSynchronously
     |> Array.toList
 
+let mergeMediaUrls (tweet: Tweet) =
+    match tweet.qrt with
+    | Some qrt -> tweet.mediaURLs @ qrt.mediaURLs  // Concatenate the two lists if qrt is Some
+    | None -> tweet.mediaURLs  // If qrt is None, just return the main tweet's mediaURLs
+
 let getTwitterReply (url: string) =
     let tweet = getTweetFromUrlAsync url |> Async.RunSynchronously
     let replyText =
-        match tweet.user_screen_name, tweet.user_name, tweet.text with
-        | ah, a, Some t -> Some $"<b>{a}</b> <i>(@​{ah})</i>: <blockquote>{t}</blockquote>"
-        | ah, a, _ -> Some $"<b>{a}</b> <i>(@​{ah})</i>:"
-    let gallery = processUrls tweet.mediaURLs
+        match tweet.user_screen_name, tweet.user_name, tweet.text, tweet.qrt with
+        | ah, a, Some t, Some qrt -> Some $"""
+            <b>{a}</b> <i>(@​{ah})</i>:
+            <blockquote>{t}</blockquote>
+            
+            Quoting <b>{qrt.user_name}</b> <i>@​{qrt.user_screen_name}</i>:
+            <blockquote>{qrt.text |> Option.defaultValue ""}</blockquote>
+            """
+        | ah, a, Some t, _ -> Some $"<b>{a}</b> <i>(@​{ah})</i>:\n <blockquote>{t}</blockquote>"
+        | ah, a, _, _ -> Some $"<b>{a}</b> <i>(@​{ah})</i>:"
+
+    let mediaUrls = mergeMediaUrls tweet
+    let gallery = processUrls mediaUrls
     match gallery.Length with
     | i when i > 0 -> Some (Reply.createGallery gallery replyText)
     | _ -> Some (Reply.createMessage replyText.Value)
