@@ -29,7 +29,7 @@ module private Impl =
     let headers = loadJson<Dictionary<string, string>> "igHeaders.json"
     let urlContent = loadJson<KeyValuePair<string, string> list> "igUrlContent.json"
     let postRegex = Regex (@"https://www\.instagram\.com/(?:reel?|p)/([\w-]+)/?", RegexOptions.Compiled)
-    let shareRegex = Regex(@"https://www\.instagram\.com/share/reel/([a-zA-Z0-9]+)/?", RegexOptions.Compiled)
+    let shareRegex = Regex(@"https://www\.instagram\.com/share/(?:reel/)?([a-zA-Z0-9_/-]+)/?", RegexOptions.Compiled)
     
     let (|PostType|_|) url =
         postRegex.Match(url).Groups
