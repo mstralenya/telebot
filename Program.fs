@@ -71,17 +71,16 @@ let reply (reply: Reply, messageId: MessageId, chatId: ChatId, ctx: UpdateContex
             sendRequestAsync req ctx |> Async.RunSynchronously
             [thumbnailFilename; videoFile.File] |> Seq.iter deleteFile
     | Gallery imageGallery ->
+        let caption = truncateWithEllipsis imageGallery.Caption 1024
         let gallery =
             imageGallery.Media
             |> Seq.map (fun g ->
-                let caption = truncateWithEllipsis imageGallery.Caption 1024
                 match g with
                 | Photo p -> 
                     InputMedia.Photo(
                         InputMediaPhoto.Create(
                             "photo",
                             InputFile.File(p, File.OpenRead(p)),
-                            ?caption = caption,
                             ?parseMode = Some ParseMode.HTML
                         ))
                 | Video v ->
@@ -89,7 +88,6 @@ let reply (reply: Reply, messageId: MessageId, chatId: ChatId, ctx: UpdateContex
                         InputMediaVideo.Create(
                             "video",
                             InputFile.File(v, File.OpenRead(v)),
-                            ?caption = caption,
                             ?parseMode = Some ParseMode.HTML
                         ))
                 )
@@ -100,8 +98,15 @@ let reply (reply: Reply, messageId: MessageId, chatId: ChatId, ctx: UpdateContex
             requests
             |> Seq.toList
             |> List.iter (fun request -> request |> Async.RunSynchronously)
-        
-        let replies =
+            
+        let textRequest = 
+            caption 
+            |> Option.map (fun msg ->
+                let textReply = Req.SendMessage.Make(chatId, msg, replyParameters = ReplyParameters.Create(messageId.MessageId, chatId), parseMode = ParseMode.HTML)
+                sendRequestAsync textReply ctx
+            )
+
+        let mediaRequests = 
             gallery
             |> Seq.map (fun g ->
                 Req.SendMediaGroup.Make(
@@ -111,10 +116,14 @@ let reply (reply: Reply, messageId: MessageId, chatId: ChatId, ctx: UpdateContex
                     replyParameters = ReplyParameters.Create(messageId.MessageId, chatId)
                 )
             )
-            |> Seq.map (fun r ->
-                sendRequestAsync r ctx)
+            |> Seq.map (fun r -> sendRequestAsync r ctx)
+
+        let replies =
+            match textRequest with
+            | Some textReq -> Seq.append (Seq.singleton textReq) mediaRequests
+            | None -> mediaRequests
             |> sendRequestsInOrder
-        
+
         imageGallery.Media |> Seq.map(string) |> Seq.iter deleteFile
         
     | Message message ->
