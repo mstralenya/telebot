@@ -20,6 +20,7 @@
     <Compile Include="Seq.fs" />
     <Compile Include="Policies.fs" />
     <Compile Include="Text.fs" />
+    <Compile Include="LoggingHandler.fs" />
     <Compile Include="Thumbnail.fs" />
     <Compile Include="VideoDownloader.fs" />
     <Compile Include="InstagramData.fs" />

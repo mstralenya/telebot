@@ -8,6 +8,7 @@ open System.Text.Json
 open System.Text.RegularExpressions
 open Telebot.Text
 open Telebot.VideoDownloader
+open Telebot.LoggingHandler
 // Define the data structures
 type Size = {
     height: int
@@ -77,7 +78,9 @@ let replaceDomain (url: string) =
 // Function to fetch JSON response from the URL
 let fetchJsonAsync (url: string) =
     async {
-        use httpClient = new HttpClient()
+        let handler = LoggingHandler(new HttpClientHandler())
+        let httpClient = new HttpClient(handler)
+        httpClient.DefaultRequestHeaders.UserAgent.ParseAdd("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.3")
         let! response = httpClient.GetStringAsync(url) |> Async.AwaitTask
         return response
     }
@@ -132,12 +135,12 @@ let getTwitterReply (url: string) =
     let replyText =
         match tweet.user_screen_name, tweet.user_name, tweet.text, tweet.qrt with
         | ah, a, Some t, Some qrt -> Some $"""
-            <b>{a}</b> <i>(@​{ah})</i>:
-            <blockquote>{t}</blockquote>
-            
-            Quoting <b>{qrt.user_name}</b> <i>@​{qrt.user_screen_name}</i>:
-            <blockquote>{qrt.text |> Option.defaultValue ""}</blockquote>
-            """
+<b>{a}</b> <i>(@​{ah})</i>:
+<blockquote>{t}</blockquote>
+
+Quoting <b>{qrt.user_name}</b> <i>@​{qrt.user_screen_name}</i>:
+<blockquote>{qrt.text |> Option.defaultValue ""}</blockquote>
+"""
         | ah, a, Some t, _ -> Some $"<b>{a}</b> <i>(@​{ah})</i>:\n <blockquote>{t}</blockquote>"
         | ah, a, _, _ -> Some $"<b>{a}</b> <i>(@​{ah})</i>:"
 
