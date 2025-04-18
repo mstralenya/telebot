@@ -23,6 +23,11 @@ type Reply =
     | Gallery of Gallery
     | Message of string
 
+type DownloadResult =
+    | Success of Reply
+    | InvalidUrl
+    | DownloadError of string
+
 module Reply =
     let createVideoFileWithCaption file caption =
         VideoFile {

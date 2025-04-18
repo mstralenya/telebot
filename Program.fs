@@ -27,6 +27,11 @@ let truncateWithEllipsis (input: string option) (maxLength: int) : string option
             Some (truncated + "...")
     | None -> None
 
+let getVideoThumbnail (videoPath: string) =
+    let thumbnailFilename = $"{Guid.NewGuid()}.jpg"
+    extractThumbnail videoPath thumbnailFilename
+    thumbnailFilename
+
 let reply (reply: Reply, messageId: MessageId, chatId: ChatId, ctx: UpdateContext) =
     match reply with
     | VideoFile videoFile ->
@@ -39,8 +44,7 @@ let reply (reply: Reply, messageId: MessageId, chatId: ChatId, ctx: UpdateContex
         else
             let thumbnailFilename = $"{Guid.NewGuid()}.jpg"
             extractThumbnail videoFile.File thumbnailFilename
-            let video = InputFile.File(videoFile.File, File.OpenRead(videoFile.File))
-            let rt = videoFile.Caption
+            
             let info = getVideoInfo videoFile.File
 
             let (duration, width, height) =
@@ -49,7 +53,9 @@ let reply (reply: Reply, messageId: MessageId, chatId: ChatId, ctx: UpdateContex
                 | None -> (None, None, None)
 
             let thumbFile = InputFile.File(thumbnailFilename, File.OpenRead(thumbnailFilename))
+            let video = InputFile.File(videoFile.File, File.OpenRead(videoFile.File))
             
+            let rt = videoFile.Caption
             let caption = truncateWithEllipsis rt 1024
 
             let req =
@@ -84,11 +90,26 @@ let reply (reply: Reply, messageId: MessageId, chatId: ChatId, ctx: UpdateContex
                             ?parseMode = Some ParseMode.HTML
                         ))
                 | Video v ->
+                    let thumbnailFilename = $"{Guid.NewGuid()}.jpg"
+                    extractThumbnail v thumbnailFilename
+                    
+                    let info = getVideoInfo v
+
+                    let (duration, width, height) =
+                        match info with
+                        | Some(d, w, h) -> (Some d, Some w, Some h)
+                        | None -> (None, None, None)
+
+                    let thumbFile = Some (InputFile.File(thumbnailFilename, File.OpenRead(thumbnailFilename)))
                     InputMedia.Video(
                         InputMediaVideo.Create(
                             "video",
                             InputFile.File(v, File.OpenRead(v)),
-                            ?parseMode = Some ParseMode.HTML
+                            ?parseMode = Some ParseMode.HTML,
+                            ?duration = duration,
+                            ?width = width,
+                            ?height = height,
+                            ?thumbnail = thumbFile
                         ))
                 )
             |> Seq.chunkBySize 10

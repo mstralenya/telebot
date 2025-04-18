@@ -7,9 +7,7 @@ open System.Net.Http.Json
 open System.Text.Json
 open System.Text.RegularExpressions
 open System.Collections.Generic
-open System.Threading
 open Telebot.InstagramData
-open Telebot.Policies
 open Telebot.Text
 open Telebot.VideoDownloader
 
@@ -18,9 +16,9 @@ type PostType =
     | Post of string
     | Nothing
 
-module Async =
-    let map f computation =
-        async.Bind(computation, f >> async.Return)
+module private Constants =
+    let [<Literal>] ApiEndpoint = "https://www.instagram.com/api/graphql"
+
 
 module private Impl =
     let loadJson<'T> path = 
@@ -45,21 +43,21 @@ module private Impl =
     
     let createRequest postId =
         let content = urlContent @ [getContentPostId postId]
-        let request = new HttpRequestMessage(HttpMethod.Post, "https://www.instagram.com/api/graphql")
+        let request = new HttpRequestMessage(HttpMethod.Post, Constants.ApiEndpoint)
         request.Content <- new FormUrlEncodedContent(content)
         headers |> Seq.iter (fun kv -> request.Headers.Add(kv.Key, kv.Value))
         request
     
     let fetchMediaData postId = async {
-        use client = new HttpClient()
         use request = createRequest postId
-        let! response = executeWithPolicyAsync (client.SendAsync request |> Async.AwaitTask)
-        let r = response.Content.ReadAsStringAsync CancellationToken.None |> Async.AwaitTask |> Async.RunSynchronously
+        let response = HttpClient.executeRequestAsync request
         return! response.Content.ReadFromJsonAsync<InstagramMediaResponse>() |> Async.AwaitTask
     }
     
     let downloadMedia url isVideo = async {
-        let fileName = $"""ig_{Guid.NewGuid()}.{(if isVideo then "mp4" else "jpg")}"""
+        let guid = Guid.NewGuid()
+        let fileExtension = if isVideo then "mp4" else "jpg"
+        let fileName = $"ig_{guid}.{fileExtension}"
         do! downloadFileAsync url fileName
         return if isVideo then Video fileName else Photo fileName
     }
@@ -67,16 +65,15 @@ module private Impl =
     let getCaption (xdt: InstagramXdt) =
         xdt.EdgeMediaToCaption.Edges
         |> List.tryHead
-        |> Option.map (_.Node.Text)
+        |> Option.map _.Node.Text
         |> Option.defaultValue ""
 
 open Impl
 
 let private getRealInstagramUrl (shareUrl: string) =
     async {
-        use httpClient = new HttpClient()
-        httpClient.DefaultRequestHeaders.UserAgent.ParseAdd("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.3")
-        let! response = httpClient.GetAsync(shareUrl) |> Async.AwaitTask
+        let response = HttpClient.getAsync shareUrl
+        
         if response.IsSuccessStatusCode then
             let realUrl = response.RequestMessage.RequestUri.ToString()
             return realUrl
@@ -88,8 +85,8 @@ let private downloadReel rId = async {
     let! media = fetchMediaData rId
     return!
         media.Data
-        |> Option.bind (_.InstagramXdt)
-        |> Option.bind (_.VideoUrl)
+        |> Option.bind _.InstagramXdt
+        |> Option.bind _.VideoUrl
         |> function
             | Some url ->
                 let gallery = [|downloadMedia url true|] |> Async.Parallel |> Async.RunSynchronously |> List.ofArray
@@ -124,11 +121,19 @@ let private downloadPost pId = async {
 let getInstagramReply url =
     async {
         match url with
-        | PostType (Reel id) -> return! downloadReel id
-        | PostType (Post id) -> return! downloadPost id
-        | _ -> return Reply.createMessage "Invalid Instagram URL"
+        | PostType (Reel id) -> 
+            let! result = downloadReel id
+            return Success result
+        | PostType (Post id) ->
+            let! result = downloadPost id
+            return Success result
+        | _ -> return InvalidUrl
     }
-    |> Async.RunSynchronously |> Some
+    |> Async.RunSynchronously 
+    |> function
+        | Success reply -> Some reply
+        | InvalidUrl -> Some (Reply.createMessage "Invalid Instagram URL")
+        | DownloadError msg -> Some (Reply.createMessage msg)
     
 let getInstagramShareReply url =
     let realUrl = getRealInstagramUrl url |> Async.RunSynchronously

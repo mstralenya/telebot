@@ -42,6 +42,8 @@ let getVideoInfo (videoPath: string) =
             let width = int64 resolutionMatch.Groups.[1].Value
             let height = int64 resolutionMatch.Groups.[2].Value
 
+            Log.Information $"Video Info: Duration: {durationInSeconds} seconds, Resolution: {width}x{height}"
+            
             Some (durationInSeconds, width, height)
         else
             None

@@ -78,7 +78,7 @@ let replaceDomain (url: string) =
 // Function to fetch JSON response from the URL
 let fetchJsonAsync (url: string) =
     async {
-        let handler = LoggingHandler(new HttpClientHandler())
+        let handler = new LoggingHandler(new HttpClientHandler())
         let httpClient = new HttpClient(handler)
         httpClient.DefaultRequestHeaders.UserAgent.ParseAdd("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.3")
         let! response = httpClient.GetStringAsync(url) |> Async.AwaitTask
