@@ -53,3 +53,13 @@ let getLinks (regex: Regex) (text: string option) =
         |> Seq.map (_.Value)
         |> Seq.toList)
     |> Option.defaultValue List.empty
+
+let truncateWithEllipsis (input: string option) (maxLength: int) : string option =
+    match input with
+    | Some str ->
+        if str.Length <= maxLength then
+            Some str
+        else
+            let truncated = str.Substring(0, maxLength - 3)
+            Some (truncated + "...")
+    | None -> None

@@ -1,5 +1,6 @@
 ﻿module Telebot.Thumbnail
 
+open System
 open System.Diagnostics
 open System.IO
 open Serilog
@@ -91,3 +92,8 @@ let extractThumbnail (videoPath: string) (outputPath: string) =
         Log.Error($"Error extracting thumbnail: {errorTask.Result}")
     else
         Log.Information($"Thumbnail extracted successfully: {outputPath}")
+        
+let getVideoThumbnail (videoPath: string) =
+    let thumbnailFilename = $"{Guid.NewGuid()}.jpg"
+    extractThumbnail videoPath thumbnailFilename
+    thumbnailFilename

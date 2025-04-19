@@ -17,140 +17,129 @@ open Telebot.Instagram
 
 let sendRequestAsync (req: 'TReq) (ctx: UpdateContext) = req |> api ctx.Config |> Async.Ignore
 
-let truncateWithEllipsis (input: string option) (maxLength: int) : string option =
-    match input with
-    | Some str ->
-        if str.Length <= maxLength then
-            Some str
-        else
-            let truncated = str.Substring(0, maxLength - 3)
-            Some (truncated + "...")
-    | None -> None
+let private sendMediaWithCaption (fileToSend: string) (caption: string option) (messageId: MessageId) (chatId: ChatId) (ctx: UpdateContext) =
+    let req = 
+        Req.SendPhoto.Make(
+            chatId,
+            InputFile.File(fileToSend, File.OpenRead(fileToSend)),
+            parseMode = ParseMode.HTML,
+            replyParameters = ReplyParameters.Create(messageId.MessageId, chatId),
+            ?caption = caption
+        )
+    sendRequestAsync req ctx |> Async.RunSynchronously
+    deleteFile fileToSend
 
-let getVideoThumbnail (videoPath: string) =
-    let thumbnailFilename = $"{Guid.NewGuid()}.jpg"
-    extractThumbnail videoPath thumbnailFilename
-    thumbnailFilename
+let private sendVideoWithThumbnail (videoPath: string) (caption: string option) (messageId: MessageId) (chatId: ChatId) (ctx: UpdateContext) =
+    let thumbnailFilename = getVideoThumbnail videoPath
+    let info = getVideoInfo videoPath
+    let (duration, width, height) =
+        match info with
+        | Some(d, w, h) -> (Some d, Some w, Some h)
+        | None -> (None, None, None)
+
+    let thumbFile = InputFile.File(thumbnailFilename, File.OpenRead(thumbnailFilename))
+    let video = InputFile.File(videoPath, File.OpenRead(videoPath))
+
+    let req =
+        Req.SendVideo.Make(
+            chatId,
+            video,
+            parseMode = ParseMode.HTML,
+            replyParameters = ReplyParameters.Create(messageId.MessageId, chatId),
+            showCaptionAboveMedia = true,
+            disableNotification = true,
+            supportsStreaming = true,
+            thumbnail = thumbFile,
+            ?width = width,
+            ?height = height,
+            ?duration = duration,
+            ?caption = caption
+        )
+    sendRequestAsync req ctx |> Async.RunSynchronously
+    [thumbnailFilename; videoPath] |> Seq.iter deleteFile
+
+let private createMediaInput (media: GalleryDisplay) =
+    match media with
+    | Photo p ->
+        InputMedia.Photo(
+            InputMediaPhoto.Create(
+                "photo",
+                InputFile.File(p, File.OpenRead(p)),
+                ?parseMode = Some ParseMode.HTML
+            ))
+    | Video v ->
+        let thumbnailFilename = getVideoThumbnail v
+        let info = getVideoInfo v
+        let (duration, width, height) =
+            match info with
+            | Some(d, w, h) -> (Some d, Some w, Some h)
+            | None -> (None, None, None)
+
+        let thumbFile = Some (InputFile.File(thumbnailFilename, File.OpenRead(thumbnailFilename)))
+        InputMedia.Video(
+            InputMediaVideo.Create(
+                "video",
+                InputFile.File(v, File.OpenRead(v)),
+                ?parseMode = Some ParseMode.HTML,
+                ?duration = duration,
+                ?width = width,
+                ?height = height,
+                ?thumbnail = thumbFile
+            ))
+
+let private sendMediaGallery (media: GalleryDisplay list) (caption: string option) (messageId: MessageId) (chatId: ChatId) (ctx: UpdateContext) =
+    let gallery =
+        media
+        |> Seq.map createMediaInput
+        |> Seq.chunkBySize 10
+        |> Seq.toArray
+
+    let textReq =
+        caption 
+        |> Option.map (fun msg ->
+            let req = Req.SendMessage.Make(chatId, msg, replyParameters = ReplyParameters.Create(messageId.MessageId, chatId), parseMode = ParseMode.HTML)
+            sendRequestAsync req ctx)
+
+    let mediaReqs =
+        gallery
+        |> Seq.map (fun g ->
+            Req.SendMediaGroup.Make(
+                chatId,
+                g,
+                disableNotification = true,
+                replyParameters = ReplyParameters.Create(messageId.MessageId, chatId)
+            ))
+        |> Seq.map (fun r -> sendRequestAsync r ctx)
+
+    match textReq with
+    | Some textReq -> Seq.append (Seq.singleton textReq) mediaReqs
+    | None -> mediaReqs
+    |> Seq.iter Async.RunSynchronously
+
+    media |> Seq.map string |> Seq.iter deleteFile
 
 let reply (reply: Reply, messageId: MessageId, chatId: ChatId, ctx: UpdateContext) =
     match reply with
     | VideoFile videoFile ->
-        // Check the file size
         let fileInfo = FileInfo(videoFile.File)
-
         if fileInfo.Length > 50L * 1024L * 1024L then
             Log.Information $"File size is greater than 50 MB. Deleting file: %s{videoFile.File}"
             deleteFile videoFile.File
         else
-            let thumbnailFilename = $"{Guid.NewGuid()}.jpg"
-            extractThumbnail videoFile.File thumbnailFilename
-            
-            let info = getVideoInfo videoFile.File
+            let caption = truncateWithEllipsis videoFile.Caption 1024
+            sendVideoWithThumbnail videoFile.File caption messageId chatId ctx
 
-            let (duration, width, height) =
-                match info with
-                | Some(d, w, h) -> (Some d, Some w, Some h)
-                | None -> (None, None, None)
-
-            let thumbFile = InputFile.File(thumbnailFilename, File.OpenRead(thumbnailFilename))
-            let video = InputFile.File(videoFile.File, File.OpenRead(videoFile.File))
-            
-            let rt = videoFile.Caption
-            let caption = truncateWithEllipsis rt 1024
-
-            let req =
-                Req.SendVideo.Make(
-                    chatId,
-                    video,
-                    parseMode = ParseMode.HTML,
-                    replyParameters = ReplyParameters.Create(messageId.MessageId, chatId),
-                    showCaptionAboveMedia = true,
-                    disableNotification = true,
-                    supportsStreaming = true,
-                    thumbnail = thumbFile,
-                    ?width = width,
-                    ?height = height,
-                    ?duration = duration,
-                    ?caption = caption
-                )
-
-            sendRequestAsync req ctx |> Async.RunSynchronously
-            [thumbnailFilename; videoFile.File] |> Seq.iter deleteFile
     | Gallery imageGallery ->
         let caption = truncateWithEllipsis imageGallery.Caption 1024
-        let gallery =
-            imageGallery.Media
-            |> Seq.map (fun g ->
-                match g with
-                | Photo p -> 
-                    InputMedia.Photo(
-                        InputMediaPhoto.Create(
-                            "photo",
-                            InputFile.File(p, File.OpenRead(p)),
-                            ?parseMode = Some ParseMode.HTML
-                        ))
-                | Video v ->
-                    let thumbnailFilename = $"{Guid.NewGuid()}.jpg"
-                    extractThumbnail v thumbnailFilename
-                    
-                    let info = getVideoInfo v
+        match imageGallery.Media with
+        | [singleMedia] ->
+            match singleMedia with
+            | Photo p -> sendMediaWithCaption p caption messageId chatId ctx
+            | Video v -> sendVideoWithThumbnail v caption messageId chatId ctx
+        | media -> sendMediaGallery media caption messageId chatId ctx
 
-                    let (duration, width, height) =
-                        match info with
-                        | Some(d, w, h) -> (Some d, Some w, Some h)
-                        | None -> (None, None, None)
-
-                    let thumbFile = Some (InputFile.File(thumbnailFilename, File.OpenRead(thumbnailFilename)))
-                    InputMedia.Video(
-                        InputMediaVideo.Create(
-                            "video",
-                            InputFile.File(v, File.OpenRead(v)),
-                            ?parseMode = Some ParseMode.HTML,
-                            ?duration = duration,
-                            ?width = width,
-                            ?height = height,
-                            ?thumbnail = thumbFile
-                        ))
-                )
-            |> Seq.chunkBySize 10
-            |> Seq.toArray
-
-        let sendRequestsInOrder (requests: seq<Async<unit>>) =
-            requests
-            |> Seq.toList
-            |> List.iter (fun request -> request |> Async.RunSynchronously)
-            
-        let textRequest = 
-            caption 
-            |> Option.map (fun msg ->
-                let textReply = Req.SendMessage.Make(chatId, msg, replyParameters = ReplyParameters.Create(messageId.MessageId, chatId), parseMode = ParseMode.HTML)
-                sendRequestAsync textReply ctx
-            )
-
-        let mediaRequests = 
-            gallery
-            |> Seq.map (fun g ->
-                Req.SendMediaGroup.Make(
-                    chatId,
-                    g,
-                    disableNotification = true,
-                    replyParameters = ReplyParameters.Create(messageId.MessageId, chatId)
-                )
-            )
-            |> Seq.map (fun r -> sendRequestAsync r ctx)
-
-        let replies =
-            match textRequest with
-            | Some textReq -> Seq.append (Seq.singleton textReq) mediaRequests
-            | None -> mediaRequests
-            |> sendRequestsInOrder
-
-        imageGallery.Media |> Seq.map(string) |> Seq.iter deleteFile
-        
     | Message message ->
-        let req =
-            Req.SendMessage.Make(chatId, message, replyParameters = ReplyParameters.Create(messageId.MessageId, chatId), parseMode = ParseMode.HTML)
-
+        let req = Req.SendMessage.Make(chatId, message, replyParameters = ReplyParameters.Create(messageId.MessageId, chatId), parseMode = ParseMode.HTML)
         sendRequestAsync req ctx |> Async.Start
 
 let processVideos
