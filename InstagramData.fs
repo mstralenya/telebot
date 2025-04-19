@@ -3,16 +3,16 @@
 open System.Text.Json.Serialization
 
 [<Struct>]
-type Dimension = { Height: int; Width: int }
+type InstagramDimension = { Height: int; Width: int }
 
-type SharingFrictionInfo = {
+type InstagramSharingFrictionInfo = {
     [<JsonPropertyName("should_have_sharing_friction")>]
     ShouldHaveSharingFriction: bool
     [<JsonPropertyName("bloks_app_url")>]
     BloksAppUrl: string option
 }
 
-type DisplayResource = {
+type InstagramDisplayResource = {
     [<JsonPropertyName("src")>]
     SourceUrl: string
     [<JsonPropertyName("config_width")>]
@@ -21,12 +21,12 @@ type DisplayResource = {
     ConfigHeight: int
 }
 
-type TaggedUserEdge = {
+type InstagramTaggedUserEdge = {
     [<JsonPropertyName("edges")>]
     Edges: obj list
 }
 
-type MediaNode = {
+type InstagramMediaNode = {
     [<JsonPropertyName("__typename")>]
     TypeName: string
     [<JsonPropertyName("id")>]
@@ -34,7 +34,7 @@ type MediaNode = {
     [<JsonPropertyName("shortcode")>]
     Shortcode: string
     [<JsonPropertyName("dimensions")>]
-    Dimensions: Dimension
+    Dimensions: InstagramDimension
     [<JsonPropertyName("gating_info")>]
     GatingInfo: obj option
     [<JsonPropertyName("fact_check_overall_rating")>]
@@ -44,7 +44,7 @@ type MediaNode = {
     [<JsonPropertyName("sensitivity_friction_info")>]
     SensitivityFrictionInfo: obj option
     [<JsonPropertyName("sharing_friction_info")>]
-    SharingFrictionInfo: SharingFrictionInfo
+    SharingFrictionInfo: InstagramSharingFrictionInfo
     [<JsonPropertyName("media_overlay_info")>]
     MediaOverlayInfo: obj option
     [<JsonPropertyName("media_preview")>]
@@ -54,7 +54,7 @@ type MediaNode = {
     [<JsonPropertyName("video_url")>]
     VideoUrl: string
     [<JsonPropertyName("display_resources")>]
-    DisplayResources: DisplayResource list
+    DisplayResources: InstagramDisplayResource list
     [<JsonPropertyName("accessibility_caption")>]
     AccessibilityCaption: string option
     [<JsonPropertyName("is_video")>]
@@ -64,21 +64,21 @@ type MediaNode = {
     [<JsonPropertyName("upcoming_event")>]
     UpcomingEvent: obj option
     [<JsonPropertyName("edge_media_to_tagged_user")>]
-    EdgeMediaToTaggedUser: TaggedUserEdge
+    EdgeMediaToTaggedUser: InstagramTaggedUserEdge
 }
 
-type Edge = {
+type InstagramEdge = {
     [<JsonPropertyName("node")>]
-    Node: MediaNode
+    Node: InstagramMediaNode
 }
 
-type EdgeSidecarToChildren = {
+type InstagramEdgeSidecarToChildren = {
     [<JsonPropertyName("edges")>]
-    Edges: Edge list
+    Edges: InstagramEdge list
 }
 
 [<CLIMutable>]
-type CaptionNode = {
+type InstagramCaptionNode = {
     [<JsonPropertyName("created_at")>]
     CreatedAt: string
     [<JsonPropertyName("text")>]
@@ -88,9 +88,9 @@ type CaptionNode = {
 }
 
 [<CLIMutable>]
-type CaptionEdge = {
+type InstagramCaptionEdge = {
     [<JsonPropertyName("node")>]
-    Node: CaptionNode
+    Node: InstagramCaptionNode
 }
 
 type InstagramXdt = {
@@ -101,17 +101,17 @@ type InstagramXdt = {
     [<JsonPropertyName("is_video")>]
     IsVideo: bool
     [<JsonPropertyName("edge_media_to_caption")>]
-    EdgeMediaToCaption: {| Edges: CaptionEdge list |}
+    EdgeMediaToCaption: {| Edges: InstagramCaptionEdge list |}
     [<JsonPropertyName("edge_sidecar_to_children")>]
-    EdgeSidecarToChildren: EdgeSidecarToChildren option
+    EdgeSidecarToChildren: InstagramEdgeSidecarToChildren option
 }
 
-type Data = {
+type InstagramData = {
     [<JsonPropertyName("xdt_shortcode_media")>]
     InstagramXdt: InstagramXdt option
 }
 
 type InstagramMediaResponse = {
     [<JsonPropertyName("data")>]
-    Data: Data option
+    Data: InstagramData option
 }

@@ -54,14 +54,6 @@ module private Impl =
         return! response.Content.ReadFromJsonAsync<InstagramMediaResponse>() |> Async.AwaitTask
     }
     
-    let downloadMedia url isVideo = async {
-        let guid = Guid.NewGuid()
-        let fileExtension = if isVideo then "mp4" else "jpg"
-        let fileName = $"ig_{guid}.{fileExtension}"
-        do! downloadFileAsync url fileName
-        return if isVideo then Video fileName else Photo fileName
-    }
-    
     let getCaption (xdt: InstagramXdt) =
         xdt.EdgeMediaToCaption.Edges
         |> List.tryHead

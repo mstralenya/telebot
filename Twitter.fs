@@ -1,119 +1,28 @@
 ﻿module Telebot.Twitter
 
-open System
-open System.Net.Http
-open System.Security.Cryptography
-open System.Text
+open System.Net.Http.Json
 open System.Text.Json
 open System.Text.RegularExpressions
 open Telebot.Text
+open Telebot.TwitterData
 open Telebot.VideoDownloader
-open Telebot.LoggingHandler
-// Define the data structures
-type Size = {
-    height: int
-    width: int
-}
-
-type MediaExtended = {
-    altText: string option
-    size: Size
-    thumbnail_url: string
-    mediaType: string
-    url: string
-}
-
-type Qrt = {
-    allSameType: bool
-    article: string option
-    combinedMediaUrl: string option
-    communityNote: string option
-    conversationID: string
-    date: string
-    date_epoch: int64
-    hasMedia: bool
-    hashtags: string list
-    lang: string
-    likes: int
-    mediaURLs: string list
-    media_extended: MediaExtended list
-    pollData: string option
-    possibly_sensitive: bool
-    qrtURL: string
-    replies: int
-    retweets: int
-    text: string option
-    tweetID: string
-    tweetURL: string
-    user_name: string
-    user_profile_image_url: string
-    user_screen_name: string
-}
-
-type Tweet = {
-    date_epoch: int64
-    hashtags: string list
-    likes: int
-    mediaURLs: string list
-    media_extended: MediaExtended list
-    pollData: string option
-    possibly_sensitive: bool
-    qrt: Qrt option
-    qrtURL: string
-    replies: int
-    retweets: int
-    text: string option
-    tweetID: string
-    tweetURL: string
-    user_name: string
-    user_profile_image_url: string
-    user_screen_name: string
-}
-
 
 // Function to replace the domain in the URL
 let replaceDomain (url: string) =
     url.Replace("https://x.com/", "https://api.vxtwitter.com/")
 
-// Function to fetch JSON response from the URL
-let fetchJsonAsync (url: string) =
-    async {
-        let handler = new LoggingHandler(new HttpClientHandler())
-        let httpClient = new HttpClient(handler)
-        httpClient.DefaultRequestHeaders.UserAgent.ParseAdd("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.3")
-        let! response = httpClient.GetStringAsync(url) |> Async.AwaitTask
-        return response
-    }
-
-// Function to parse JSON response into Tweet structure
-let parseTweet (json: string) =
-    let options = JsonSerializerOptions()
-    // options.Converters.Add(JsonFSharpConverter())
-    options.PropertyNameCaseInsensitive <- true
-    JsonSerializer.Deserialize<Tweet>(json, options)
-
 // Main function to process the URL and return the Tweet structure
 let getTweetFromUrlAsync (url: string) =
     async {
         let newUrl = replaceDomain url
-        let! json = fetchJsonAsync newUrl
-        return parseTweet json
+        let response = HttpClient.getAsync newUrl
+        let options = JsonSerializerOptions()
+        options.PropertyNameCaseInsensitive <- true
+        let result = response.Content.ReadFromJsonAsync<Tweet>(options) |> Async.AwaitTask |> Async.RunSynchronously
+        return result
     }
-
-let private computeHash (input: string) =
-    using (SHA256.Create()) (fun sha256 ->
-        let bytes = Encoding.UTF8.GetBytes(input)
-        let hashBytes = sha256.ComputeHash(bytes)
-        BitConverter.ToString(hashBytes).Replace("-", "").ToLower()
-    )
  
 let private twitterRegex = Regex(@"https://(x|twitter).com/.*/status/(\d+)", RegexOptions.Compiled)
-
-let downloadMedia url isVideo = async {
-        let fileName = $"""t_{Guid.NewGuid()}.{(if isVideo then "mp4" else "jpg")}"""
-        do! downloadFileAsync url fileName
-        return if isVideo then Video fileName else Photo fileName
-    }
 
 // Function to process a list of URLs and return an array of results
 let processUrls (urls: string list) =

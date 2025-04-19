@@ -2,7 +2,6 @@
 
 open System
 open System.IO
-open System.Net.Http
 open System.Text.RegularExpressions
 open System.Threading.Tasks
 open Serilog
@@ -21,8 +20,7 @@ let getYoutubeLinks (_: string option) = getLinks youtubeRegex
 
 let private downloadFileAsync (url: string) (filePath: string) =
     async {
-        use client = new HttpClient()
-        let! response = client.GetAsync(url) |> Async.AwaitTask
+        let response = HttpClient.getAsync url
         response.EnsureSuccessStatusCode() |> ignore
         let! content = response.Content.ReadAsByteArrayAsync() |> Async.AwaitTask
         File.WriteAllBytes(filePath, content)
