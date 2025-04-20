@@ -92,8 +92,10 @@ let extractThumbnail (videoPath: string) (outputPath: string) =
         Log.Error($"Error extracting thumbnail: {errorTask.Result}")
     else
         Log.Information($"Thumbnail extracted successfully: {outputPath}")
-        
+
+let getThumbnailName (videoPath: string) = $"{videoPath}.jpg"
+
 let getVideoThumbnail (videoPath: string) =
-    let thumbnailFilename = $"{Guid.NewGuid()}.jpg"
+    let thumbnailFilename = getThumbnailName videoPath
     extractThumbnail videoPath thumbnailFilename
     thumbnailFilename

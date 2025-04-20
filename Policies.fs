@@ -4,6 +4,7 @@ open System
 open System.IO
 open System.Net.Http
 open Polly
+open Serilog
 
 // Define a retry policy for transient HTTP errors
 let private retryPolicy =
@@ -31,3 +32,16 @@ let private combinedPolicy = Policy.WrapAsync(bulkheadPolicy, retryPolicy)
 // Expose a function to execute an async workflow with the combined policy
 let executeWithPolicyAsync (asyncWorkflow: Async<HttpResponseMessage>) =
     combinedPolicy.ExecuteAsync(fun () -> asyncWorkflow |> Async.StartAsTask) |> Async.AwaitTask
+
+let tryThreeTimes (processMessage: unit -> unit) =
+    let rec tryWithRetries retriesLeft =
+        try
+            processMessage ()
+        with ex ->
+            if retriesLeft > 0 then
+                Log.Error(ex, $"Error occured, retries left: {retriesLeft}")
+                tryWithRetries (retriesLeft - 1)
+            else
+                Log.Error(ex, "Error occurred. No more retries left.")
+
+    tryWithRetries 3

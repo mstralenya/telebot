@@ -30,6 +30,7 @@
     <Compile Include="TikTok.fs" />
     <Compile Include="Twitter.fs" />
     <Compile Include="Youtube.fs" />
+    <Compile Include="Reply.fs" />
     <Compile Include="Program.fs" />
   </ItemGroup>
 
