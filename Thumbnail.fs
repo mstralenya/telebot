@@ -56,7 +56,7 @@ let extractThumbnail (videoPath: string) (outputPath: string) =
     // Ensure FFmpeg is in your PATH or specify the full path to ffmpeg.exe
     let ffmpegPath = "ffmpeg" // or full path like "C:\\path\\to\\ffmpeg.exe"
 
-    let arguments = $""" -y -i "{videoPath}"  -vf "blackframe=0,metadata=select:key=lavfi.blackframe.pblack:value=90:function=less,scale='if(gt(iw,ih),320,-1)':'if(gt(ih,iw),320,-1)'" -frames:v 1 -q:v 2 "{outputPath}" """
+    let arguments = $""" -y -i "{videoPath}"  -vf "blackframe=0,metadata=select:key=lavfi.blackframe.pblack:value=90:function=less,scale='if(gt(iw,ih),320,-1)':'if(gt(ih,iw),320,-1)'" -frames:v 1 -q:v 2 -update 1 "{outputPath}" """
 
     let startInfo = ProcessStartInfo(
         FileName = ffmpegPath,
