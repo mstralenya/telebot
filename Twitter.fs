@@ -25,19 +25,17 @@ let getTweetFromUrlAsync (url: string) =
 let private twitterRegex = Regex(@"https://(x|twitter).com/.*/status/(\d+)", RegexOptions.Compiled)
 
 // Function to process a list of URLs and return an array of results
-let processUrls (urls: string list) =
+let processUrls (urls: TwitterMediaExtended list) =
     urls
-    |> List.map (fun url ->
-        let isVideo = url.EndsWith(".mp4")
-        downloadMedia url isVideo)
+    |> List.map (fun media -> downloadMedia media.url (media.mediaType = TwitterMedia.Video))
     |> Async.Parallel
     |> Async.RunSynchronously
     |> Array.toList
 
 let mergeMediaUrls (tweet: Tweet) =
     match tweet.qrt with
-    | Some qrt -> tweet.mediaURLs @ qrt.mediaURLs  // Concatenate the two lists if qrt is Some
-    | None -> tweet.mediaURLs  // If qrt is None, just return the main tweet's mediaURLs
+    | Some qrt -> tweet.media_extended @ qrt.media_extended  // Concatenate the two lists if qrt is Some
+    | None -> tweet.media_extended  // If qrt is None, just return the main tweet's mediaURLs
 
 let getTwitterReply (url: string) =
     let tweet = getTweetFromUrlAsync url |> Async.RunSynchronously
