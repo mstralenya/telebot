@@ -20,7 +20,7 @@ let private getVideoUrl json =
         let doc = JObject.Parse json
         doc.SelectToken("aweme_list[0].video.play_addr.url_list[0]")
         |> Option.ofObj
-        |> Option.map (_.ToString())
+        |> Option.map _.ToString()
     with _ -> None
 
 let private fetchWithHeadersAsync (url: string) =
@@ -28,9 +28,8 @@ let private fetchWithHeadersAsync (url: string) =
         let response = HttpClient.getAsync url
         response.EnsureSuccessStatusCode() |> ignore
         let! content = response.Content.ReadAsStringAsync() |> Async.AwaitTask
-        return Regex.Match(content, "item_id=(\d+)")
-               |> Option.ofObj
-               |> Option.bind (fun m -> Some m.Groups[1].Value)
+        let m = Regex.Match(content, "item_id=(\d+)")
+        return if m.Success then Some m.Groups[1].Value else None
     }
 
 let private tikTokeRegex = Regex(@"http(s)?://(www\.)?(\w+\.)?tiktok.com/(.*)", RegexOptions.Compiled)
@@ -41,7 +40,7 @@ let getTikTokReply (url: string) =
     async {
         let! videoId = fetchWithHeadersAsync url
         match videoId with
-        | Some id ->
+        | Some id when not (String.IsNullOrEmpty id) ->
             let! feed = fetchTikTokFeedAsync id |> Async.RunSynchronously
             return getVideoUrl feed
                    |> Option.map (fun videoUrl ->
@@ -49,7 +48,7 @@ let getTikTokReply (url: string) =
                        downloadFileAsync videoUrl fileName |> Async.RunSynchronously
                        Log.Information $"Video downloaded to %s{fileName}"
                        createVideoFile fileName)
-        | None ->
+        | _ ->
             Log.Information "Video ID not found"
             return None
     }
