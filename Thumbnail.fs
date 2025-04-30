@@ -49,7 +49,7 @@ let getVideoInfo (videoPath: string) =
         else
             None
     else
-        Log.Error($"Error: {error}")
+        Log.Error $"Error: {error}"
         None
 
 let extractThumbnail (videoPath: string) (outputPath: string) =
@@ -89,9 +89,9 @@ let extractThumbnail (videoPath: string) (outputPath: string) =
     errorTask.Wait()
 
     if thumbnailProcess.ExitCode <> 0 then
-        Log.Error($"Error extracting thumbnail: {errorTask.Result}")
+        Log.Error $"Error extracting thumbnail: {errorTask.Result}"
     else
-        Log.Information($"Thumbnail extracted successfully: {outputPath}")
+        Log.Information $"Thumbnail extracted successfully: {outputPath}"
 
 let getThumbnailName (videoPath: string) = $"{videoPath}.jpg"
 

@@ -18,7 +18,7 @@ let private fetchTikTokFeedAsync videoId =
 let private getVideoUrl json =
     try
         let doc = JObject.Parse json
-        doc.SelectToken("aweme_list[0].video.play_addr.url_list[0]")
+        doc.SelectToken "aweme_list[0].video.play_addr.url_list[0]"
         |> Option.ofObj
         |> Option.map _.ToString()
     with _ -> None

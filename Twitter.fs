@@ -18,7 +18,7 @@ let getTweetFromUrlAsync (url: string) =
         let response = HttpClient.getAsync newUrl
         let options = JsonSerializerOptions()
         options.PropertyNameCaseInsensitive <- true
-        let result = response.Content.ReadFromJsonAsync<Tweet>(options) |> Async.AwaitTask |> Async.RunSynchronously
+        let result = response.Content.ReadFromJsonAsync<Tweet> options |> Async.AwaitTask |> Async.RunSynchronously
         return result
     }
  

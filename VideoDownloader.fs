@@ -13,10 +13,10 @@ let downloadFileAsync(url: string) (filePath: string) =
     }
     
 let downloadMedia url isVideo = async {
-        let fileName = $"""{Guid.NewGuid()}.{(if isVideo then "mp4" else "jpg")}"""
+        let fileName = $"""{Guid.NewGuid()}.{if isVideo then "mp4" else "jpg"}"""
         do! downloadFileAsync url fileName
         return if isVideo then Video fileName else Photo fileName
     }
 
 let deleteFile(filePath: string) =
-    if File.Exists(filePath) then File.Delete(filePath)
+    if File.Exists filePath then File.Delete filePath

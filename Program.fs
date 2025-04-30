@@ -14,8 +14,8 @@ let updateArrived (ctx: UpdateContext) =
     | Some { MessageId = messageId
              Chat = chat
              Text = messageText } ->
-        let mId = MessageId.Create(messageId)
-        let cId = ChatId.Int(chat.Id)
+        let mId = MessageId.Create messageId
+        let cId = ChatId.Int chat.Id
 
         [ processTikTokVideos
           processInstagramLinks
@@ -27,7 +27,7 @@ let updateArrived (ctx: UpdateContext) =
 
 type SerilogLogger() =
     interface Funogram.Types.IBotLogger with
-        member _.Log(text) = Log.Information(text)
+        member _.Log text = Log.Information text
         member _.Enabled = true
 
 [<EntryPoint>]

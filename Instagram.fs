@@ -32,9 +32,9 @@ module private Impl =
     let (|PostType|_|) url =
         postRegex.Match(url).Groups
         |> Seq.tryLast
-        |> Option.map (_.Value)
+        |> Option.map _.Value
         |> function
-            | Some id when url.Contains("/reel") -> Some (Reel id)
+            | Some id when url.Contains "/reel" -> Some (Reel id)
             | Some id -> Some (Post id)
             | _ -> None
     

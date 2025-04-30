@@ -27,8 +27,8 @@ type TwitterMediaJsonConverter() =
 
     override _.Write(writer, value, options) =
         match value with
-        | TwitterMedia.Image -> writer.WriteStringValue("image")
-        | TwitterMedia.Video -> writer.WriteStringValue("video")
+        | TwitterMedia.Image -> writer.WriteStringValue "image"
+        | TwitterMedia.Video -> writer.WriteStringValue "video"
         | _ -> System.ArgumentOutOfRangeException() |> raise
 
 type TwitterMediaExtended = {

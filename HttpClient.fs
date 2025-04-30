@@ -10,11 +10,11 @@ module private Constants =
 let client =
     let handler = new LoggingHandler(new HttpClientHandler())
     let c = new HttpClient(handler)
-    c.DefaultRequestHeaders.UserAgent.ParseAdd(Constants.UserAgent)
+    c.DefaultRequestHeaders.UserAgent.ParseAdd Constants.UserAgent
     c
 
 let getAsync (url: string) =
-    executeWithPolicyAsync (client.GetAsync(url) |> Async.AwaitTask) |> Async.RunSynchronously
+    executeWithPolicyAsync (client.GetAsync url |> Async.AwaitTask) |> Async.RunSynchronously
 
 let executeRequestAsync (request: HttpRequestMessage) : HttpResponseMessage =
     executeWithPolicyAsync (client.SendAsync request |> Async.AwaitTask) |> Async.RunSynchronously

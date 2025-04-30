@@ -20,15 +20,15 @@ let private getVideoSize (filePath: string) =
     let info = getVideoInfo filePath
     let duration, width, height =
         match info with
-        | Some(d, w, h) -> (Some d, Some w, Some h)
-        | None -> (None, None, None)
-    (duration, width, height)
+        | Some(d, w, h) -> Some d, Some w, Some h
+        | None -> None, None, None
+    duration, width, height
 
 let private sendMediaWithCaption (fileToSend: string) (caption: string option) (messageId: MessageId) (chatId: ChatId) (ctx: UpdateContext) =
     let req = 
         Req.SendPhoto.Make(
             chatId,
-            InputFile.File(fileToSend, File.OpenRead(fileToSend)),
+            InputFile.File(fileToSend, File.OpenRead fileToSend),
             parseMode = ParseMode.HTML,
             replyParameters = ReplyParameters.Create(messageId.MessageId, chatId),
             ?caption = caption
@@ -40,9 +40,9 @@ let private getVideoInputFile (videoPath: string) =
     let thumbnailFilename = getVideoThumbnail videoPath
     let duration, width, height = getVideoSize videoPath
 
-    let thumbFile = InputFile.File(thumbnailFilename, File.OpenRead(thumbnailFilename))
-    let videoFile = InputFile.File(videoPath, File.OpenRead(videoPath))
-    (videoFile, thumbFile, duration, width, height)
+    let thumbFile = InputFile.File(thumbnailFilename, File.OpenRead thumbnailFilename)
+    let videoFile = InputFile.File(videoPath, File.OpenRead videoPath)
+    videoFile, thumbFile, duration, width, height
 
 let private sendVideoWithThumbnail (videoPath: string) (caption: string option) (messageId: MessageId) (chatId: ChatId) (ctx: UpdateContext) =
     let videoFile, thumbFile, duration, width, height = getVideoInputFile videoPath    
@@ -71,7 +71,7 @@ let private createMediaInput (media: GalleryDisplay) =
         InputMedia.Photo(
             InputMediaPhoto.Create(
                 "photo",
-                InputFile.File(p, File.OpenRead(p)),
+                InputFile.File(p, File.OpenRead p),
                 ?parseMode = Some ParseMode.HTML
             ))
     | Video v ->
@@ -122,7 +122,7 @@ let private sendMediaGallery (media: GalleryDisplay list) (caption: string optio
 let reply (reply: Reply, messageId: MessageId, chatId: ChatId, ctx: UpdateContext) =
     match reply with
     | VideoFile videoFile ->
-        let fileInfo = FileInfo(videoFile.File)
+        let fileInfo = FileInfo videoFile.File
         if fileInfo.Length > 50L * 1024L * 1024L then
             Log.Information $"File size is greater than 50 MB. Deleting file: %s{videoFile.File}"
             deleteFile videoFile.File

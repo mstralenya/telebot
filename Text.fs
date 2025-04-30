@@ -35,7 +35,7 @@ module Reply =
             Caption = caption
         }
     
-    let createVideoFile file= createVideoFileWithCaption file None
+    let createVideoFile file = createVideoFileWithCaption file None
     
     let createGallery files caption = Gallery {
         Media = files
@@ -48,9 +48,9 @@ module Reply =
 let getLinks (regex: Regex) (text: string option) =
     text
     |> Option.map (fun text ->
-        regex.Matches(text)
+        regex.Matches text
         |> Seq.cast<Match>
-        |> Seq.map (_.Value)
+        |> Seq.map _.Value
         |> Seq.toList)
     |> Option.defaultValue List.empty
 
