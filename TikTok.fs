@@ -4,6 +4,7 @@ open System
 open System.Text.RegularExpressions
 open Newtonsoft.Json.Linq
 open Serilog
+open Telebot.PrometheusMetrics
 open Telebot.Text
 open Telebot.Text.Reply
 open Telebot.VideoDownloader
@@ -42,13 +43,16 @@ let getTikTokReply (url: string) =
         match videoId with
         | Some id when not (String.IsNullOrEmpty id) ->
             let! feed = fetchTikTokFeedAsync id |> Async.RunSynchronously
-            return getVideoUrl feed
-                   |> Option.map (fun videoUrl ->
-                       let fileName = $"tt_{id}_{Guid.NewGuid()}.mp4"
-                       downloadFileAsync videoUrl fileName |> Async.RunSynchronously
-                       Log.Information $"Video downloaded to %s{fileName}"
-                       createVideoFile fileName)
+            let result = getVideoUrl feed
+                       |> Option.map (fun videoUrl ->
+                           let fileName = $"tt_{id}_{Guid.NewGuid()}.mp4"
+                           downloadFileAsync videoUrl fileName |> Async.RunSynchronously
+                           Log.Information $"Video downloaded to %s{fileName}"
+                           createVideoFile fileName)
+            tiktokSuccessMetric.Inc()
+            return result
         | _ ->
+            tiktokMissingVideoIdMetric.Inc()
             Log.Information "Video ID not found"
             return None
     }

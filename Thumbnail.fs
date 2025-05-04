@@ -1,9 +1,9 @@
 ﻿module Telebot.Thumbnail
 
-open System
 open System.Diagnostics
 open System.IO
 open Serilog
+open Telebot.PrometheusMetrics
 
 let getVideoInfo (videoPath: string) =
     let ffmpegPath = "ffprobe" // or full path to ffmpeg.exe if not in PATH
@@ -45,10 +45,13 @@ let getVideoInfo (videoPath: string) =
 
             Log.Information $"Video Info: Duration: {durationInSeconds} seconds, Resolution: {width}x{height}"
             
+            videoSizeSuccessCounter.Inc()
             Some (durationInSeconds, width, height)
         else
+            videoSizeFailureCounter.Inc()
             None
     else
+        videoSizeFailureCounter.Inc()
         Log.Error $"Error: {error}"
         None
 
@@ -89,8 +92,10 @@ let extractThumbnail (videoPath: string) (outputPath: string) =
     errorTask.Wait()
 
     if thumbnailProcess.ExitCode <> 0 then
+        thumbnailFailureCounter.Inc()
         Log.Error $"Error extracting thumbnail: {errorTask.Result}"
     else
+        thumbnailSuccessCounter.Inc()
         Log.Information $"Thumbnail extracted successfully: {outputPath}"
 
 let getThumbnailName (videoPath: string) = $"{videoPath}.jpg"

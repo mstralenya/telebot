@@ -38,7 +38,7 @@ module Reply =
     let createVideoFile file = createVideoFileWithCaption file None
     
     let createGallery files caption = Gallery {
-        Media = files
+        Media = List.ofArray files
         Caption = caption
     }
 

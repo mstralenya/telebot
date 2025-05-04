@@ -2,6 +2,7 @@
 
 open System
 open System.IO
+open Telebot.PrometheusMetrics
 open Telebot.Text
 
 let downloadFileAsync(url: string) (filePath: string) =
@@ -10,6 +11,7 @@ let downloadFileAsync(url: string) (filePath: string) =
         response.EnsureSuccessStatusCode() |> ignore
         let! content = response.Content.ReadAsByteArrayAsync() |> Async.AwaitTask
         File.WriteAllBytes(filePath, content)
+        downloadCounter.Inc()
     }
     
 let downloadMedia url isVideo = async {
@@ -20,3 +22,4 @@ let downloadMedia url isVideo = async {
 
 let deleteFile(filePath: string) =
     if File.Exists filePath then File.Delete filePath
+    deleteCounter.Inc()

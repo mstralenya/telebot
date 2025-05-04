@@ -72,7 +72,7 @@ let private createMediaInput (media: GalleryDisplay) =
             InputMediaPhoto.Create(
                 "photo",
                 InputFile.File(p, File.OpenRead p),
-                ?parseMode = Some ParseMode.HTML
+                parseMode = ParseMode.HTML
             ))
     | Video v ->
         let videoFile, thumbFile, duration, width, height = getVideoInputFile v
@@ -80,7 +80,7 @@ let private createMediaInput (media: GalleryDisplay) =
             InputMediaVideo.Create(
                 "video",
                 videoFile,
-                ?parseMode = Some ParseMode.HTML,
+                parseMode = ParseMode.HTML,
                 ?duration = duration,
                 ?width = width,
                 ?height = height,

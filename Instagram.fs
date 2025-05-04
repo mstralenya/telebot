@@ -1,6 +1,5 @@
 ﻿module Telebot.Instagram
 
-open System
 open System.IO
 open System.Net.Http
 open System.Net.Http.Json
@@ -8,6 +7,7 @@ open System.Text.Json
 open System.Text.RegularExpressions
 open System.Collections.Generic
 open Telebot.InstagramData
+open Telebot.PrometheusMetrics
 open Telebot.Text
 open Telebot.VideoDownloader
 
@@ -81,7 +81,7 @@ let private downloadReel rId = async {
         |> Option.bind _.VideoUrl
         |> function
             | Some url ->
-                let gallery = [|downloadMedia url true|] |> Async.Parallel |> Async.RunSynchronously |> List.ofArray
+                let gallery = [|downloadMedia url true|] |> Async.Parallel |> Async.RunSynchronously
                 async { return Reply.createGallery gallery None }
             | None -> async { return Reply.createMessage "Failed to download reel" }
 }
@@ -101,35 +101,44 @@ let private downloadPost pId = async {
             | _ ->
                 let url = if xdt.IsVideo then xdt.VideoUrl else xdt.ImageUrl
                 match url with
-                | Some u -> [| downloadMedia u xdt.IsVideo |]
+                | Some u ->  [| downloadMedia u xdt.IsVideo |]
                 | None -> [||]
                 |> Async.Parallel
         
-        return Reply.createGallery (List.ofArray mediaItems) (Some (getCaption xdt))
+        return Reply.createGallery mediaItems (Some (getCaption xdt))
     | None ->
         return Reply.createMessage "Failed to download post"
 }
 
 let getInstagramReply url =
-    async {
-        match url with
-        | PostType (Reel id) -> 
-            let! result = downloadReel id
-            return Success result
-        | PostType (Post id) ->
-            let! result = downloadPost id
-            return Success result
-        | _ -> return InvalidUrl
-    }
-    |> Async.RunSynchronously 
-    |> function
-        | Success reply -> Some reply
-        | InvalidUrl -> Some (Reply.createMessage "Invalid Instagram URL")
-        | DownloadError msg -> Some (Reply.createMessage msg)
-    
+    let result =
+        async {
+            match url with
+            | PostType (Reel id) -> 
+                let! res = downloadReel id
+                return Success res
+            | PostType (Post id) ->
+                let! res = downloadPost id
+                return Success res
+            | _ -> 
+                return InvalidUrl
+        }
+        |> Async.RunSynchronously
+    match result with
+    | Success reply ->
+        instagramSuccessCounter.Inc()
+        Some reply
+    | InvalidUrl ->
+        instagramMissingVideoIdCounter.Inc()
+        Some (Reply.createMessage "Invalid Instagram URL")
+    | DownloadError msg ->
+        instagramFailureCounter.Inc()
+        Some (Reply.createMessage msg)
+
 let getInstagramShareReply url =
     let realUrl = getRealInstagramUrl url |> Async.RunSynchronously
     getInstagramReply realUrl
 
 let getInstagramLinks (_: string option) = getLinks postRegex
 let getInstagramShareLinks (_: string option) = getLinks shareRegex
+

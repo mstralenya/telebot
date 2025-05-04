@@ -5,6 +5,7 @@ open System.IO
 open System.Net.Http
 open Polly
 open Serilog
+open Telebot.PrometheusMetrics
 
 // Define a retry policy for transient HTTP errors
 let private retryPolicy =
@@ -37,11 +38,13 @@ let tryThreeTimes (processMessage: unit -> unit) =
     let rec tryWithRetries retriesLeft =
         try
             processMessage ()
+            messageSuccessCounter.Inc() // Increment success counter
         with ex ->
             if retriesLeft > 0 then
                 Log.Error(ex, $"Error occured, retries left: {retriesLeft}")
                 tryWithRetries (retriesLeft - 1)
             else
                 Log.Error(ex, "Error occurred. No more retries left.")
+                messageFailureCounter.Inc() // Increment failure counter
 
     tryWithRetries 3

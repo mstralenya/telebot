@@ -49,7 +49,7 @@ let getTwitterReply (url: string) =
           Some $"<b>{a}</b> <i>(@​{ah})</i>:"
 
     let mediaUrls = mergeMediaUrls tweet
-    let gallery = processUrls mediaUrls
+    let gallery = processUrls mediaUrls |> List.toArray
     match gallery.Length with
     | i when i > 0 -> Some (Reply.createGallery gallery replyText)
     | _ -> Some (Reply.createMessage replyText.Value)

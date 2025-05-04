@@ -3,6 +3,12 @@
 open System.Net.Http
 open System.Threading
 open System.Threading.Tasks
+open Serilog
+
+type SerilogLogger() =
+    interface Funogram.Types.IBotLogger with
+        member _.Log text = Log.Information text
+        member _.Enabled = true
 
 type LoggingHandler(innerHandler: HttpMessageHandler) =
     inherit DelegatingHandler(innerHandler)
