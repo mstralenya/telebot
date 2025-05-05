@@ -18,6 +18,24 @@ let private youtubeRegex = Regex(@"https:\/\/(youtu\.be\/[a-zA-Z0-9_-]+|(?:www\.
 
 let getYoutubeLinks (_: string option) = getLinks youtubeRegex
 
+let getVideoStream (streamManifest: StreamManifest) =
+    let h264Stream = 
+        streamManifest.GetVideoOnlyStreams()
+        |> Seq.filter (fun c -> 
+            c.Container = Container.Mp4 && 
+            c.VideoCodec.StartsWith("avc1") && 
+            c.Size.MegaBytes < 48)
+        |> Seq.tryMaxBy _.Bitrate.KiloBitsPerSecond
+        
+    match h264Stream with
+    | Some stream -> Some stream
+    | None -> 
+        streamManifest.GetVideoOnlyStreams()
+        |> Seq.filter (fun c -> 
+            c.Container = Container.WebM && 
+            c.Size.MegaBytes < 48)
+        |> Seq.tryMaxBy _.Bitrate.KiloBitsPerSecond
+
 let getYoutubeReply (url: string) =
     async {
     let youtube = YoutubeClient()
@@ -40,9 +58,7 @@ let getYoutubeReply (url: string) =
         Log.Information $"Audio Stream options: %A{streamManifest.GetAudioOnlyStreams() |> Seq.toList |> List.map (fun x -> x.Container, x.Bitrate, x.Size, x.AudioCodec)}"
         
         // Get the best video stream (e.g., highest quality)
-        let videoStream = streamManifest.GetVideoOnlyStreams()
-                          |> Seq.filter (fun c -> c.Container = Container.Mp4 && c.Size.MegaBytes < 48) // Filter out streams larger than 48 MB since limit for file is 50 MB
-                          |> Seq.tryMaxBy _.Bitrate.KiloBitsPerSecond
+        let videoStream = getVideoStream streamManifest
         let audioStream = streamManifest.GetAudioOnlyStreams()
                           |> Seq.filter (fun c -> c.Size.MegaBytes < 2)
                           |> Seq.tryMaxBy _.Bitrate.KiloBitsPerSecond
@@ -53,7 +69,10 @@ let getYoutubeReply (url: string) =
             Log.Information $"Downloading stream: %s{videoS.Url}"
 
             let streams : IStreamInfo list = [videoS; audioS]
-            let conversionRequest = ConversionRequestBuilder(fileName).Build()
+            let conversionRequest = ConversionRequestBuilder(fileName)
+                                        .SetPreset(ConversionPreset.Fast)
+                                        .SetContainer(Container.Mp4)
+                                        .Build()
             youtube.Videos.DownloadAsync(streams, conversionRequest)
                 |> _.AsTask() // Convert ValueTask to Task
                 |> Async.AwaitTask // Await the Task
