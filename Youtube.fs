@@ -18,14 +18,6 @@ let private youtubeRegex = Regex(@"https:\/\/(youtu\.be\/[a-zA-Z0-9_-]+|(?:www\.
 
 let getYoutubeLinks (_: string option) = getLinks youtubeRegex
 
-let private downloadFileAsync (url: string) (filePath: string) =
-    async {
-        let response = HttpClient.getAsync url
-        response.EnsureSuccessStatusCode() |> ignore
-        let! content = response.Content.ReadAsByteArrayAsync() |> Async.AwaitTask
-        File.WriteAllBytes(filePath, content)
-    }
-
 let getYoutubeReply (url: string) =
     async {
     let youtube = YoutubeClient()
@@ -49,7 +41,7 @@ let getYoutubeReply (url: string) =
         
         // Get the best video stream (e.g., highest quality)
         let videoStream = streamManifest.GetVideoOnlyStreams()
-                          |> Seq.filter (fun c -> c.Container = Container.Mp4 && c.Size.MegaBytes < 48) // Filter out streams larger than 48 MB since limit for file is 50 MB
+                          |> Seq.filter (fun c -> c.Container = Container.WebM && c.Size.MegaBytes < 48) // Filter out streams larger than 48 MB since limit for file is 50 MB
                           |> Seq.tryMaxBy _.Bitrate.KiloBitsPerSecond
         let audioStream = streamManifest.GetAudioOnlyStreams()
                           |> Seq.filter (fun c -> c.Size.MegaBytes < 2)
