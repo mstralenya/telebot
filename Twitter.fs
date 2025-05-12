@@ -41,7 +41,7 @@ let getTwitterReply (url: string) =
     let tweet = getTweetFromUrlAsync url |> Async.RunSynchronously
     let replyText =
         match tweet.user_screen_name, tweet.user_name, tweet.text, tweet.qrt with
-        | ah, a, Some t, Some { user_name = qa; user_screen_name = qah; text = qtxt } ->
+        | ah, a, Some t, Some { user_name = qa; user_screen_name = qah; text = Some qtxt } ->
           Some $"""<b>{a}</b> <i>(@​{ah})</i>:<blockquote>{t}</blockquote>Quoting <b>{qa}</b><i>(@​{qah})</i>:<blockquote>{qtxt}</blockquote>"""
         | ah, a, Some t, _ ->
           Some $"<b>{a}</b> <i>(@​{ah})</i>: <blockquote>{t}</blockquote>"

@@ -18,7 +18,6 @@ open Suave.Filters
 open Suave.Operators
 open Suave.Successful
 
-
 let updateArrived (ctx: UpdateContext) =
     match ctx.Update.Message with
     | Some { MessageId = messageId
@@ -67,7 +66,7 @@ let startWebServer port =
 let main _ =
     Console.OutputEncoding <- Text.Encoding.UTF8
     Log.Logger <- LoggerConfiguration().WriteTo.Console().CreateLogger()
-    
+ 
     // Start the metrics server
     let metricsPort = Environment.GetEnvironmentVariable("METRICS_PORT")
                       |> Option.ofObj
@@ -80,11 +79,11 @@ let main _ =
         async {
             let config =
                 Config.defaultConfig |> Config.withReadTokenFromEnv "TELEGRAM_BOT_TOKEN"
-    
+ 
             let config =
                 { config with
                     RequestLogger = Some(SerilogLogger()) }
-    
+ 
             let! _ = Api.deleteWebhookBase () |> api config
             Log.Information "starting bot..."
             return! startBot config updateArrived None
@@ -94,7 +93,7 @@ let main _ =
         Log.Information "Stopping bot..."
         Log.Information "Bot stopped"
         Log.CloseAndFlush()
-    
+ 
     Log.CloseAndFlush()
     0
 
