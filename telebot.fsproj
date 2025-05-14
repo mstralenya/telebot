@@ -6,6 +6,8 @@
     <DockerDefaultTargetOS>Linux</DockerDefaultTargetOS>
     <AssemblyName>Telebot</AssemblyName>
     <RootNamespace>Telebot</RootNamespace>
+    <PublishSingleFile>true</PublishSingleFile>
+    <SatelliteResourceLanguages>en-US</SatelliteResourceLanguages>
   </PropertyGroup>
 
   <ItemGroup>
@@ -37,17 +39,17 @@
 
   <ItemGroup>
     <PackageReference Include="Funogram" Version="3.0.2" />
-    <PackageReference Include="Funogram.Telegram" Version="7.10.0" />
-    <PackageReference Include="Microsoft.Extensions.Hosting" Version="9.0.4" />
+    <PackageReference Include="Funogram.Telegram" Version="9.0.0" />
+    <PackageReference Include="Microsoft.Extensions.Hosting" Version="9.0.5" />
     <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
     <PackageReference Include="Polly" Version="8.5.2" />
     <PackageReference Include="prometheus-net" Version="8.2.1" />
     <PackageReference Include="Serilog" Version="4.2.0" />
     <PackageReference Include="Serilog.Sinks.Console" Version="6.0.0" />
     <PackageReference Include="Suave" Version="2.6.2" />
-    <PackageReference Include="YoutubeExplode" Version="6.5.3" />
-    <PackageReference Include="YoutubeExplode.Converter" Version="6.5.3" />
-    <PackageReference Update="FSharp.Core" Version="9.0.201" />
+    <PackageReference Include="YoutubeExplode" Version="6.5.4" />
+    <PackageReference Include="YoutubeExplode.Converter" Version="6.5.4" />
+    <PackageReference Update="FSharp.Core" Version="9.0.300" />
   </ItemGroup>
 
 </Project>
