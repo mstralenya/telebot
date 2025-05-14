@@ -40,9 +40,8 @@ let private getVideoInputFile (videoPath: string) =
     let thumbnailFilename = getVideoThumbnail videoPath
     let duration, width, height = getVideoSize videoPath
 
-    let thumbFile = InputFile.File(thumbnailFilename, File.OpenRead thumbnailFilename)
     let videoFile = InputFile.File(videoPath, File.OpenRead videoPath)
-    videoFile, thumbFile, duration, width, height
+    videoFile, thumbnailFilename, duration, width, height
 
 let private sendVideoWithThumbnail (videoPath: string) (caption: string option) (messageId: MessageId) (chatId: ChatId) (ctx: UpdateContext) =
     let videoFile, thumbFile, duration, width, height = getVideoInputFile videoPath    
@@ -56,7 +55,7 @@ let private sendVideoWithThumbnail (videoPath: string) (caption: string option) 
             showCaptionAboveMedia = true,
             disableNotification = true,
             supportsStreaming = true,
-            thumbnail = thumbFile,
+            thumbnail =  InputFile.File(thumbFile, File.OpenRead thumbFile),
             ?width = width,
             ?height = height,
             ?duration = duration,
