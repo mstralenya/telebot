@@ -18,13 +18,13 @@ let private youtubeRegex = Regex(@"https:\/\/(youtu\.be\/[a-zA-Z0-9_-]+|(?:www\.
 
 let getYoutubeLinks (_: string option) = getLinks youtubeRegex
 
-let getVideoStream (streamManifest: StreamManifest) =
+let getVideoStream (streamManifest: StreamManifest) (maxSize: FileSize) =
     let h264Stream = 
         streamManifest.GetVideoOnlyStreams()
         |> Seq.filter (fun c -> 
             c.Container = Container.Mp4 && 
             c.VideoCodec.StartsWith("avc1") && 
-            c.Size.MegaBytes < 48)
+            c.Size.Bytes < maxSize.Bytes)
         |> Seq.tryMaxBy _.Bitrate.KiloBitsPerSecond
         
     match h264Stream with
@@ -33,7 +33,7 @@ let getVideoStream (streamManifest: StreamManifest) =
         streamManifest.GetVideoOnlyStreams()
         |> Seq.filter (fun c -> 
             c.Container = Container.WebM && 
-            c.Size.MegaBytes < 48)
+            c.Size.Bytes < maxSize.Bytes)
         |> Seq.tryMaxBy _.Bitrate.KiloBitsPerSecond
 
 let getYoutubeReply (url: string) =
@@ -53,10 +53,14 @@ let getYoutubeReply (url: string) =
     Log.Information $"Audio Stream options: %A{streamManifest.GetAudioOnlyStreams() |> Seq.toList |> List.map (fun x -> x.Container, x.Bitrate, x.Size, x.AudioCodec)}"
     
     // Get the best video stream (e.g., highest quality)
-    let videoStream = getVideoStream streamManifest
     let audioStream = streamManifest.GetAudioOnlyStreams()
-                      |> Seq.filter (fun c -> c.Size.MegaBytes < 2)
+                      |> Seq.filter (fun c -> c.Size.MegaBytes < 8)
                       |> Seq.tryMaxBy _.Bitrate.KiloBitsPerSecond
+    let audioSize = audioStream
+                    |> Option.map _.Size
+                    |> Option.defaultValue (FileSize(1))
+    let maxVideoSizeBytes = FileSize(1024L*1024L*50L - audioSize.Bytes)
+    let videoStream = getVideoStream streamManifest maxVideoSizeBytes
 
     match videoStream, audioStream with
     | Some videoS, Some audioS ->

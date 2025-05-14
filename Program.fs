@@ -34,10 +34,18 @@ let updateArrived (ctx: UpdateContext) =
           processYoutubeLinks ]
         |> List.iter (fun processMessage ->
             let stopwatch = System.Diagnostics.Stopwatch.StartNew()
+            let mutable isSuccess = false
             try
-                tryThreeTimes (fun () -> processMessage (messageText, mId, cId, ctx))
+                tryThreeTimes (fun () -> 
+                    processMessage (messageText, mId, cId, ctx)
+                    isSuccess <- true)
             finally
                 stopwatch.Stop()
+                match isSuccess with
+                | true -> Log.Debug $"Successfully processed message {messageText}"
+                | false ->
+                          let message = Req.SendMessage.Make(cId, "Failed to process link", replyParameters = ReplyParameters.Create(messageId, cId), parseMode = ParseMode.HTML)
+                          sendRequestAsync message ctx |> Async.RunSynchronously
                 processingTimeSummary.Observe(stopwatch.Elapsed.TotalMilliseconds)
         )
     | _ -> ()
