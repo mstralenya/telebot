@@ -6,7 +6,7 @@
     <DockerDefaultTargetOS>Linux</DockerDefaultTargetOS>
     <AssemblyName>Telebot</AssemblyName>
     <RootNamespace>Telebot</RootNamespace>
-    <PublishSingleFile>true</PublishSingleFile>
+<!--    <PublishSingleFile>true</PublishSingleFile>-->
     <SatelliteResourceLanguages>en-US</SatelliteResourceLanguages>
   </PropertyGroup>
 
