@@ -43,23 +43,15 @@ type TwitterMediaExtended = {
 
 type TwitterQrt = {
     allSameType: bool
-    article: string option
     combinedMediaUrl: string option
     communityNote: string option
     conversationID: string
     date: string
     date_epoch: int64
     hasMedia: bool
-    hashtags: string list
-    lang: string
-    likes: int
     mediaURLs: string list
     media_extended: TwitterMediaExtended list
-    pollData: string option
-    possibly_sensitive: bool
     qrtURL: string
-    replies: int
-    retweets: int
     text: string option
     tweetID: string
     tweetURL: string
@@ -70,16 +62,10 @@ type TwitterQrt = {
 
 type Tweet = {
     date_epoch: int64
-    hashtags: string list
-    likes: int
     mediaURLs: string list
     media_extended: TwitterMediaExtended list
-    pollData: string option
-    possibly_sensitive: bool
     qrt: TwitterQrt option
     qrtURL: string
-    replies: int
-    retweets: int
     text: string option
     tweetID: string
     tweetURL: string
