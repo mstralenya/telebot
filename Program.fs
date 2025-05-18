@@ -30,6 +30,7 @@ let updateArrived (ctx: UpdateContext) =
         let cId = ChatId.Int chat.Id
 
         [
+            processTikTokAudios
             processTikTokVideos
             processInstagramLinks
             processInstagramShareLinks

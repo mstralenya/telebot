@@ -22,6 +22,7 @@ type Reply =
     | VideoFile of VideoFile
     | Gallery of Gallery
     | Message of string
+    | AudioFile of string
 
 type DownloadResult =
     | Success of Reply
@@ -41,6 +42,8 @@ module Reply =
         Media = List.ofArray files
         Caption = caption
     }
+    
+    let createAudioFile audio = AudioFile audio
 
     /// Creates a Message reply.
     let createMessage text = Message text

@@ -80,6 +80,23 @@ let private sendVideoWithThumbnail
     sendRequestAsync req ctx |> Async.RunSynchronously
     [ getThumbnailName videoPath; videoPath ] |> Seq.iter deleteFile
 
+let private sendAudio
+    (audioPath: string)
+    (messageId: MessageId)
+    (chatId: ChatId)
+    (ctx: UpdateContext)
+    =
+    let req =
+        Req.SendAudio.Make(
+            chatId,
+            InputFile.File(audioPath, File.OpenRead audioPath),
+            replyParameters = ReplyParameters.Create(messageId.MessageId, chatId),
+            disableNotification = true
+        )
+
+    sendRequestAsync req ctx |> Async.RunSynchronously
+    [ audioPath ] |> Seq.iter deleteFile
+
 let private createMediaInput (media: GalleryDisplay) =
     match media with
     | Photo p -> InputMedia.Photo(InputMediaPhoto.Create("photo", InputFile.File(p, File.OpenRead p), parseMode = ParseMode.HTML))
@@ -149,6 +166,8 @@ let reply (reply: Reply, messageId: MessageId, chatId: ChatId, ctx: UpdateContex
         else
             let caption = truncateWithEllipsis videoFile.Caption 1024
             sendVideoWithThumbnail videoFile.File caption messageId chatId ctx
+    
+    | AudioFile audioFile -> sendAudio audioFile messageId chatId ctx
 
     | Gallery imageGallery ->
         let caption = truncateWithEllipsis imageGallery.Caption 1024
@@ -178,7 +197,8 @@ let processVideos getLinks processVideo (messageText: string option, messageId: 
 
 let processLinks getLinks processVideo = processVideos getLinks processVideo
 
-let processTikTokVideos = processLinks getTikTokLinks getTikTokReply
+let processTikTokAudios = processLinks getTikTokAudioLinks (getTikTokReply false)
+let processTikTokVideos = processLinks getTikTokVideoLinks (getTikTokReply true)
 let processInstagramLinks = processLinks getInstagramLinks getInstagramReply
 
 let processInstagramShareLinks =
