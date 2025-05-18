@@ -18,14 +18,22 @@ let sendRequestAsync (req: 'TReq) (ctx: UpdateContext) = req |> api ctx.Config |
 
 let private getVideoSize (filePath: string) =
     let info = getVideoInfo filePath
+
     let duration, width, height =
         match info with
-        | Some(d, w, h) -> Some d, Some w, Some h
+        | Some (d, w, h) -> Some d, Some w, Some h
         | None -> None, None, None
+
     duration, width, height
 
-let private sendMediaWithCaption (fileToSend: string) (caption: string option) (messageId: MessageId) (chatId: ChatId) (ctx: UpdateContext) =
-    let req = 
+let private sendMediaWithCaption
+    (fileToSend: string)
+    (caption: string option)
+    (messageId: MessageId)
+    (chatId: ChatId)
+    (ctx: UpdateContext)
+    =
+    let req =
         Req.SendPhoto.Make(
             chatId,
             InputFile.File(fileToSend, File.OpenRead fileToSend),
@@ -33,6 +41,7 @@ let private sendMediaWithCaption (fileToSend: string) (caption: string option) (
             replyParameters = ReplyParameters.Create(messageId.MessageId, chatId),
             ?caption = caption
         )
+
     sendRequestAsync req ctx |> Async.RunSynchronously
     deleteFile fileToSend
 
@@ -43,8 +52,14 @@ let private getVideoInputFile (videoPath: string) =
     let videoFile = InputFile.File(videoPath, File.OpenRead videoPath)
     videoFile, thumbnailFilename, duration, width, height
 
-let private sendVideoWithThumbnail (videoPath: string) (caption: string option) (messageId: MessageId) (chatId: ChatId) (ctx: UpdateContext) =
-    let videoFile, thumbFile, duration, width, height = getVideoInputFile videoPath    
+let private sendVideoWithThumbnail
+    (videoPath: string)
+    (caption: string option)
+    (messageId: MessageId)
+    (chatId: ChatId)
+    (ctx: UpdateContext)
+    =
+    let videoFile, thumbFile, duration, width, height = getVideoInputFile videoPath
 
     let req =
         Req.SendVideo.Make(
@@ -55,26 +70,22 @@ let private sendVideoWithThumbnail (videoPath: string) (caption: string option) 
             showCaptionAboveMedia = true,
             disableNotification = true,
             supportsStreaming = true,
-            thumbnail =  InputFile.File(thumbFile, File.OpenRead thumbFile),
+            thumbnail = InputFile.File(thumbFile, File.OpenRead thumbFile),
             ?width = width,
             ?height = height,
             ?duration = duration,
             ?caption = caption
         )
+
     sendRequestAsync req ctx |> Async.RunSynchronously
-    [getThumbnailName videoPath; videoPath] |> Seq.iter deleteFile
+    [ getThumbnailName videoPath; videoPath ] |> Seq.iter deleteFile
 
 let private createMediaInput (media: GalleryDisplay) =
     match media with
-    | Photo p ->
-        InputMedia.Photo(
-            InputMediaPhoto.Create(
-                "photo",
-                InputFile.File(p, File.OpenRead p),
-                parseMode = ParseMode.HTML
-            ))
+    | Photo p -> InputMedia.Photo(InputMediaPhoto.Create("photo", InputFile.File(p, File.OpenRead p), parseMode = ParseMode.HTML))
     | Video v ->
         let videoFile, thumbFile, duration, width, height = getVideoInputFile v
+
         InputMedia.Video(
             InputMediaVideo.Create(
                 "video",
@@ -87,17 +98,26 @@ let private createMediaInput (media: GalleryDisplay) =
             )
         )
 
-let private sendMediaGallery (media: GalleryDisplay list) (caption: string option) (messageId: MessageId) (chatId: ChatId) (ctx: UpdateContext) =
-    let gallery =
-        media
-        |> Seq.map createMediaInput
-        |> Seq.chunkBySize 10
-        |> Seq.toArray
+let private sendMediaGallery
+    (media: GalleryDisplay list)
+    (caption: string option)
+    (messageId: MessageId)
+    (chatId: ChatId)
+    (ctx: UpdateContext)
+    =
+    let gallery = media |> Seq.map createMediaInput |> Seq.chunkBySize 10 |> Seq.toArray
 
     let textReq =
-        caption 
+        caption
         |> Option.map (fun msg ->
-            let req = Req.SendMessage.Make(chatId, msg, replyParameters = ReplyParameters.Create(messageId.MessageId, chatId), parseMode = ParseMode.HTML)
+            let req =
+                Req.SendMessage.Make(
+                    chatId,
+                    msg,
+                    replyParameters = ReplyParameters.Create(messageId.MessageId, chatId),
+                    parseMode = ParseMode.HTML
+                )
+
             sendRequestAsync req ctx)
 
     let mediaReqs =
@@ -122,6 +142,7 @@ let reply (reply: Reply, messageId: MessageId, chatId: ChatId, ctx: UpdateContex
     match reply with
     | VideoFile videoFile ->
         let fileInfo = FileInfo videoFile.File
+
         if fileInfo.Length > 50L * 1024L * 1024L then
             Log.Information $"File size is greater than 50 MB. Deleting file: %s{videoFile.File}"
             deleteFile videoFile.File
@@ -131,21 +152,26 @@ let reply (reply: Reply, messageId: MessageId, chatId: ChatId, ctx: UpdateContex
 
     | Gallery imageGallery ->
         let caption = truncateWithEllipsis imageGallery.Caption 1024
+
         match imageGallery.Media with
-        | [singleMedia] ->
+        | [ singleMedia ] ->
             match singleMedia with
             | Photo p -> sendMediaWithCaption p caption messageId chatId ctx
             | Video v -> sendVideoWithThumbnail v caption messageId chatId ctx
         | media -> sendMediaGallery media caption messageId chatId ctx
 
     | Message message ->
-        let req = Req.SendMessage.Make(chatId, message, replyParameters = ReplyParameters.Create(messageId.MessageId, chatId), parseMode = ParseMode.HTML)
+        let req =
+            Req.SendMessage.Make(
+                chatId,
+                message,
+                replyParameters = ReplyParameters.Create(messageId.MessageId, chatId),
+                parseMode = ParseMode.HTML
+            )
+
         sendRequestAsync req ctx |> Async.Start
 
-let processVideos getLinks
-    processVideo
-    (messageText: string option, messageId: MessageId, chatId: ChatId, ctx: UpdateContext)
-    =
+let processVideos getLinks processVideo (messageText: string option, messageId: MessageId, chatId: ChatId, ctx: UpdateContext) =
     messageText
     |> getLinks messageText
     |> List.iter (fun link -> processVideo link |> Option.iter (fun r -> reply (r, messageId, chatId, ctx)))
@@ -154,6 +180,9 @@ let processLinks getLinks processVideo = processVideos getLinks processVideo
 
 let processTikTokVideos = processLinks getTikTokLinks getTikTokReply
 let processInstagramLinks = processLinks getInstagramLinks getInstagramReply
-let processInstagramShareLinks = processLinks getInstagramShareLinks getInstagramShareReply
+
+let processInstagramShareLinks =
+    processLinks getInstagramShareLinks getInstagramShareReply
+
 let processTwitterLinks = processLinks getTwitterLinks getTwitterReply
 let processYoutubeLinks = processLinks getYoutubeLinks getYoutubeReply

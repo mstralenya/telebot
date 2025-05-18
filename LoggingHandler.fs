@@ -12,11 +12,13 @@ type SerilogLogger() =
 
 type LoggingHandler(innerHandler: HttpMessageHandler) =
     inherit DelegatingHandler(innerHandler)
+
     override _.SendAsync(request: HttpRequestMessage, cancellationToken: CancellationToken) : Task<HttpResponseMessage> =
         // Log request
         printfn $"Request: {request}"
-        let task = base.SendAsync(request, cancellationToken)
-        task.ContinueWith(fun (t: Task<HttpResponseMessage>) ->
+        let task = ``base``.SendAsync(request, cancellationToken)
+
+        task.ContinueWith (fun (t: Task<HttpResponseMessage>) ->
             let response = t.Result
             // Log response
             printfn $"Response: {response}"

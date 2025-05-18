@@ -20,34 +20,47 @@ open Suave.Successful
 
 let updateArrived (ctx: UpdateContext) =
     match ctx.Update.Message with
-    | Some { MessageId = messageId
-             Chat = chat
-             Text = messageText } ->
+    | Some {
+               MessageId = messageId
+               Chat = chat
+               Text = messageText
+           } ->
         newMessageCounter.Inc() // Increment new message counter
         let mId = MessageId.Create messageId
         let cId = ChatId.Int chat.Id
 
-        [ processTikTokVideos
-          processInstagramLinks
-          processInstagramShareLinks
-          processTwitterLinks
-          processYoutubeLinks ]
+        [
+            processTikTokVideos
+            processInstagramLinks
+            processInstagramShareLinks
+            processTwitterLinks
+            processYoutubeLinks
+        ]
         |> List.iter (fun processMessage ->
             let stopwatch = System.Diagnostics.Stopwatch.StartNew()
             let mutable isSuccess = false
+
             try
-                tryThreeTimes (fun () -> 
+                tryThreeTimes (fun () ->
                     processMessage (messageText, mId, cId, ctx)
                     isSuccess <- true)
             finally
                 stopwatch.Stop()
+
                 match isSuccess with
                 | true -> Log.Debug $"Successfully processed message {messageText}"
                 | false ->
-                          let message = Req.SendMessage.Make(cId, "Failed to process link", replyParameters = ReplyParameters.Create(messageId, cId), parseMode = ParseMode.HTML)
-                          sendRequestAsync message ctx |> Async.RunSynchronously
-                processingTimeSummary.Observe(stopwatch.Elapsed.TotalMilliseconds)
-        )
+                    let message =
+                        Req.SendMessage.Make(
+                            cId,
+                            "Failed to process link",
+                            replyParameters = ReplyParameters.Create(messageId, cId),
+                            parseMode = ParseMode.HTML
+                        )
+
+                    sendRequestAsync message ctx |> Async.RunSynchronously
+
+                processingTimeSummary.Observe(stopwatch.Elapsed.TotalMilliseconds))
     | _ -> ()
 
 let prometheusEndpoint =
@@ -65,7 +78,11 @@ let prometheusEndpoint =
     path "/metrics" >=> Writers.setMimeType "text/plain" >=> metrics
 
 let startWebServer port =
-    let config = { defaultConfig with bindings = [ HttpBinding.createSimple HTTP "0.0.0.0" port ] }
+    let config =
+        { defaultConfig with
+            bindings = [ HttpBinding.createSimple HTTP "0.0.0.0" port ]
+        }
+
     let app = choose [ prometheusEndpoint ]
     let _, server = startWebServerAsync config app
     Async.Start(server)
@@ -74,12 +91,14 @@ let startWebServer port =
 let main _ =
     Console.OutputEncoding <- Text.Encoding.UTF8
     Log.Logger <- LoggerConfiguration().WriteTo.Console().CreateLogger()
- 
+
     // Start the metrics server
-    let metricsPort = Environment.GetEnvironmentVariable("METRICS_PORT")
-                      |> Option.ofObj
-                      |> Option.map int
-                      |> Option.defaultValue 9090
+    let metricsPort =
+        Environment.GetEnvironmentVariable("METRICS_PORT")
+        |> Option.ofObj
+        |> Option.map int
+        |> Option.defaultValue 9090
+
     Log.Information $"Starting metrics server on port {metricsPort}..."
     startWebServer metricsPort
 
@@ -87,11 +106,12 @@ let main _ =
         async {
             let config =
                 Config.defaultConfig |> Config.withReadTokenFromEnv "TELEGRAM_BOT_TOKEN"
- 
+
             let config =
                 { config with
-                    RequestLogger = Some(SerilogLogger()) }
- 
+                    RequestLogger = Some(SerilogLogger())
+                }
+
             let! _ = Api.deleteWebhookBase () |> api config
             Log.Information "starting bot..."
             return! startBot config updateArrived None
@@ -101,7 +121,6 @@ let main _ =
         Log.Information "Stopping bot..."
         Log.Information "Bot stopped"
         Log.CloseAndFlush()
- 
+
     Log.CloseAndFlush()
     0
-
