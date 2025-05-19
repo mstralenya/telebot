@@ -3,19 +3,18 @@
 open System.Text.RegularExpressions
 
 /// Represents a video file with optional metadata.
-type VideoFile = {
-    File: string
-    Caption: string option
-}
+type VideoFile =
+    { File: string; Caption: string option }
 
 type GalleryDisplay =
     | Photo of string
     | Video of string
 
-type Gallery = {
-    Media: GalleryDisplay list
-    Caption: string option
-}
+type Gallery =
+    {
+        Media: GalleryDisplay list
+        Caption: string option
+    }
 
 /// Represents a reply that can be either a video file or a text message.
 type Reply =
@@ -31,18 +30,17 @@ type DownloadResult =
 
 module Reply =
     let createVideoFileWithCaption file caption =
-        VideoFile {
-            File = file
-            Caption = caption
-        }
-    
+        VideoFile { File = file; Caption = caption }
+
     let createVideoFile file = createVideoFileWithCaption file None
-    
-    let createGallery files caption = Gallery {
-        Media = List.ofArray files
-        Caption = caption
-    }
-    
+
+    let createGallery files caption =
+        Gallery
+            {
+                Media = List.ofArray files
+                Caption = caption
+            }
+
     let createAudioFile audio = AudioFile audio
 
     /// Creates a Message reply.
@@ -50,11 +48,7 @@ module Reply =
 
 let getLinks (regex: Regex) (text: string option) =
     text
-    |> Option.map (fun text ->
-        regex.Matches text
-        |> Seq.cast<Match>
-        |> Seq.map _.Value
-        |> Seq.toList)
+    |> Option.map (fun text -> regex.Matches text |> Seq.cast<Match> |> Seq.map _.Value |> Seq.toList)
     |> Option.defaultValue List.empty
 
 let truncateWithEllipsis (input: string option) (maxLength: int) : string option =
@@ -64,5 +58,5 @@ let truncateWithEllipsis (input: string option) (maxLength: int) : string option
             Some str
         else
             let truncated = str.Substring(0, maxLength - 3)
-            Some (truncated + "...")
+            Some(truncated + "...")
     | None -> None

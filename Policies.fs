@@ -38,8 +38,7 @@ let tryThreeTimes (processMessage: unit -> unit) =
         try
             processMessage ()
             messageSuccessCounter.Inc() // Increment success counter
-        with
-        | ex ->
+        with ex ->
             if retriesLeft > 0 then
                 Log.Error(ex, $"Error occured, retries left: {retriesLeft}")
                 tryWithRetries (retriesLeft - 1)

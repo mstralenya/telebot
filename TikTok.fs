@@ -10,23 +10,26 @@ open Telebot.Text
 open Telebot.Text.Reply
 open Telebot.VideoDownloader
 
-let private fetchTikTokUrl url token=
-    let response = HttpClient.getAsync url
+let getJsonToken (json: JObject) token =
+    json.SelectToken token
+    |> Option.ofObj
+    |> Option.map _.ToString()
+    |> Option.defaultValue ""
+
+let private fetchTikTokUrl url =
+    let response = HttpClient.getAsync $"https://www.tikwm.com/api/?url={url}?hd=1"
+
     match response.StatusCode with
-        | HttpStatusCode.OK ->
-            let json = response.Content.ReadAsStringAsync()
-                       |> Async.AwaitTask
-                       |> Async.RunSynchronously
-                       |> JObject.Parse
-            json.SelectToken token
-                |> Option.ofObj
-                |> Option.map _.ToString()
-        | _ -> None
+    | HttpStatusCode.OK ->
+        response.Content.ReadAsStringAsync()
+        |> Async.AwaitTask
+        |> Async.RunSynchronously
+        |> JObject.Parse
+        |> Some
+    | _ -> None
 
-let private fetchTikTokVideoUrl url = fetchTikTokUrl url "data.play"
-let private fetchTikTokAudioUrl url = fetchTikTokUrl url "data.music"
-
-let private tikTokRegex = Regex(@"http(s)?://(www\.)?(\w+\.)?tiktok.com/(.*)", RegexOptions.Compiled)
+let private tikTokRegex =
+    Regex(@"http(s)?://(www\.)?(\w+\.)?tiktok.com/(.*)", RegexOptions.Compiled)
 
 let getTikTokAudioLinks (message: string option) =
     match message with
@@ -38,18 +41,37 @@ let getTikTokVideoLinks (message: string option) =
     | Some text when not (text.Contains "audio") -> getLinks tikTokRegex
     | _ -> fun _ -> List.empty
 
+let getAudioReply url =
+    let apiResponse = fetchTikTokUrl url
+
+    match apiResponse with
+    | Some jObject ->
+        let audioUrl = getJsonToken jObject "data.music"
+
+        let fileName =
+            getJsonToken jObject "data.music_info.title" |> fun title -> $"tt_{title}.mp3"
+
+        downloadFileAsync audioUrl fileName |> Async.RunSynchronously
+
+        Some(createAudioFile fileName)
+    | None -> Some(createMessage "Failed to download tiktok audio")
+
+let getVideoReply url =
+    let apiResponse = fetchTikTokUrl url
+
+    match apiResponse with
+    | Some jObject ->
+        let videoUrl = getJsonToken jObject "data.play"
+
+        let fileName =
+            getJsonToken jObject "data.id" |> fun title -> $"tt_{title}.mp4"
+
+        downloadFileAsync videoUrl fileName |> Async.RunSynchronously
+
+        Some(createVideoFile fileName)
+    | None -> Some(createMessage "Failed to download tiktok video")
+
 let getTikTokReply (isVideo: bool) (url: string) =
-    async {
-        let apiUrl = $"https://www.tikwm.com/api/?url={url}?hd=1"
-        let fileUrl = if isVideo then fetchTikTokVideoUrl apiUrl else fetchTikTokAudioUrl apiUrl
-        let fileName = $"tt_{id}_{Guid.NewGuid()}.mp4"
-        match fileUrl with
-            | Some fUrl ->
-                downloadFileAsync fUrl fileName |> Async.RunSynchronously
-                match isVideo with
-                    | true -> return Some (createVideoFile fileName)
-                    | false -> return Some (createAudioFile fileName)
-            | None ->
-                return Some (createMessage "Couldn't find tiktok video")
-    }
-    |> Async.RunSynchronously
+    match isVideo with
+    | true -> getVideoReply url
+    | false -> getAudioReply url

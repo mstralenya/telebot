@@ -8,7 +8,9 @@ open Telebot.PrometheusMetrics
 let getVideoInfo (videoPath: string) =
     let ffmpegPath = "ffprobe" // or full path to ffmpeg.exe if not in PATH
 
-    let arguments = $"-i \"{videoPath}\" -hide_banner"
+    let arguments =
+        $"-v error -select_streams v:0 -show_entries format=duration -show_entries stream=width,height \
+-of default=noprint_wrappers=1:nokey=1 \"{videoPath}\""
 
     let startInfo =
         ProcessStartInfo(
@@ -24,33 +26,23 @@ let getVideoInfo (videoPath: string) =
 
     thumbnailProcess.Start() |> ignore
 
+    let output = thumbnailProcess.StandardOutput.ReadToEnd()
     let error = thumbnailProcess.StandardError.ReadToEnd() // FFmpeg outputs info to stderr
 
     thumbnailProcess.WaitForExit()
 
     if thumbnailProcess.ExitCode = 0 then
         // Parse duration and resolution from FFmpeg output
-        let durationMatch =
-            System.Text.RegularExpressions.Regex.Match(error, @"Duration: (\d+):(\d+):(\d+).(\d+)")
+        let matches =
+            System.Text.RegularExpressions.Regex.Match(output, @"(\d+)\n(\d+)\n(\d+)")
 
-        let resolutionMatch =
-            System.Text.RegularExpressions.Regex.Match(error, @"(\d{2,})x(\d{2,})")
+        if matches.Success then
+            let results = 
+                [1..3] |> List.map (fun i -> int64 matches.Groups[i].Value)
 
-        if durationMatch.Success && resolutionMatch.Success then
-            let hours = int durationMatch.Groups.[1].Value
-            let minutes = int durationMatch.Groups.[2].Value
-            let seconds = int durationMatch.Groups.[3].Value
-            let milliseconds = int durationMatch.Groups.[4].Value
-
-            let durationInSeconds =
-                int64 (hours * 3600 + minutes * 60 + seconds + (milliseconds / 1000))
-
-            let width = int64 resolutionMatch.Groups.[1].Value
-            let height = int64 resolutionMatch.Groups.[2].Value
-
-            Log.Information $"Video Info: Duration: {durationInSeconds} seconds, Resolution: {width}x{height}"
+            Log.Information $"Video Info: Duration: {results[2]} seconds, Resolution: {results[1]}x{results[0]}"
             videoSizeSuccessCounter.Inc()
-            Some(durationInSeconds, width, height)
+            Some(results[2], results[0], results[1])
         else
             videoSizeFailureCounter.Inc()
             None

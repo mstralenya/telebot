@@ -61,7 +61,7 @@ let updateArrived (ctx: UpdateContext) =
 
                     sendRequestAsync message ctx |> Async.RunSynchronously
 
-                processingTimeSummary.Observe(stopwatch.Elapsed.TotalMilliseconds))
+                processingTimeSummary.Observe stopwatch.Elapsed.TotalMilliseconds)
     | _ -> ()
 
 let prometheusEndpoint =
@@ -86,7 +86,7 @@ let startWebServer port =
 
     let app = choose [ prometheusEndpoint ]
     let _, server = startWebServerAsync config app
-    Async.Start(server)
+    Async.Start server
 
 [<EntryPoint>]
 let main _ =
@@ -95,7 +95,7 @@ let main _ =
 
     // Start the metrics server
     let metricsPort =
-        Environment.GetEnvironmentVariable("METRICS_PORT")
+        Environment.GetEnvironmentVariable "METRICS_PORT"
         |> Option.ofObj
         |> Option.map int
         |> Option.defaultValue 9090

@@ -18,7 +18,7 @@ type LoggingHandler(innerHandler: HttpMessageHandler) =
         printfn $"Request: {request}"
         let task = ``base``.SendAsync(request, cancellationToken)
 
-        task.ContinueWith (fun (t: Task<HttpResponseMessage>) ->
+        task.ContinueWith(fun (t: Task<HttpResponseMessage>) ->
             let response = t.Result
             // Log response
             printfn $"Response: {response}"

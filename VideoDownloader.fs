@@ -24,5 +24,7 @@ let downloadMedia url isVideo =
     }
 
 let deleteFile (filePath: string) =
-    if File.Exists filePath then File.Delete filePath
+    if File.Exists filePath then
+        File.Delete filePath
+
     deleteCounter.Inc()

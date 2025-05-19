@@ -2,7 +2,6 @@
 
 open Prometheus
 
-
 // Global metric definitions
 let newMessageCounter =
     Metrics.CreateCounter("telebot_new_messages_total", "Number of new messages")
@@ -62,3 +61,4 @@ let tiktokSuccessMetric =
 
 let tiktokFailureMetric =
     Metrics.CreateCounter("telebot_tiktok_failure", "Number of failed TikTok video downloads")
+

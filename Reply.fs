@@ -21,7 +21,7 @@ let private getVideoSize (filePath: string) =
 
     let duration, width, height =
         match info with
-        | Some (d, w, h) -> Some d, Some w, Some h
+        | Some(d, w, h) -> Some d, Some w, Some h
         | None -> None, None, None
 
     duration, width, height
@@ -80,12 +80,7 @@ let private sendVideoWithThumbnail
     sendRequestAsync req ctx |> Async.RunSynchronously
     [ getThumbnailName videoPath; videoPath ] |> Seq.iter deleteFile
 
-let private sendAudio
-    (audioPath: string)
-    (messageId: MessageId)
-    (chatId: ChatId)
-    (ctx: UpdateContext)
-    =
+let private sendAudio (audioPath: string) (messageId: MessageId) (chatId: ChatId) (ctx: UpdateContext) =
     let req =
         Req.SendAudio.Make(
             chatId,
@@ -166,7 +161,7 @@ let reply (reply: Reply, messageId: MessageId, chatId: ChatId, ctx: UpdateContex
         else
             let caption = truncateWithEllipsis videoFile.Caption 1024
             sendVideoWithThumbnail videoFile.File caption messageId chatId ctx
-    
+
     | AudioFile audioFile -> sendAudio audioFile messageId chatId ctx
 
     | Gallery imageGallery ->
