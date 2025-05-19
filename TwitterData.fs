@@ -14,7 +14,7 @@ type TwitterMediaJsonConverter() =
 
     let parseMediaType (mediaStr: string) =
         match mediaStr.ToLowerInvariant() with
-        | "video" -> TwitterMedia.Video
+        | "video" | "gif" -> TwitterMedia.Video
         | "image" -> TwitterMedia.Image
         | _ -> failwith $"Unknown media type: {mediaStr}"
 
