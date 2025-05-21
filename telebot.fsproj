@@ -19,21 +19,23 @@
   </ItemGroup>
 
   <ItemGroup>
-    <Compile Include="PrometheusMetrics.fs" />
-    <Compile Include="InstagramData.fs" />
-    <Compile Include="TwitterData.fs" />
-    <Compile Include="LoggingHandler.fs" />
-    <Compile Include="Seq.fs" />
-    <Compile Include="Policies.fs" />
-    <Compile Include="Text.fs" />
+    <Compile Include="Data\InstagramData.fs" />
+    <Compile Include="Data\TwitterData.fs" />
+    <Compile Include="Data\DataTypes.fs" />
+    <Compile Include="Infra\PrometheusMetrics.fs" />
+    <Compile Include="Infra\LoggingHandler.fs" />
+    <Compile Include="Infra\Policies.fs" />
+    <Compile Include="Helpers.fs" />
     <Compile Include="HttpClient.fs" />
-    <Compile Include="Thumbnail.fs" />
     <Compile Include="VideoDownloader.fs" />
-    <Compile Include="Instagram.fs" />
-    <Compile Include="TikTok.fs" />
-    <Compile Include="Twitter.fs" />
-    <Compile Include="Youtube.fs" />
-    <Compile Include="Reply.fs" />
+    <Compile Include="Text.fs" />
+    <Compile Include="MessageBus\Messages.fs" />
+    <Compile Include="MessageBus\Bus.fs" />
+    <Compile Include="MessageBus\Handlers.fs" />
+    <Compile Include="Processors\Instagram.fs" />
+    <Compile Include="Processors\TikTok.fs" />
+    <Compile Include="Processors\Twitter.fs" />
+    <Compile Include="Processors\Youtube.fs" />
     <Compile Include="Program.fs" />
   </ItemGroup>
 
@@ -49,6 +51,7 @@
     <PackageReference Include="Suave" Version="2.6.2" />
     <PackageReference Include="YoutubeExplode" Version="6.5.4" />
     <PackageReference Include="YoutubeExplode.Converter" Version="6.5.4" />
+    <PackageReference Include="WolverineFx" Version="1.12.1" />
     <PackageReference Update="FSharp.Core" Version="9.0.300" />
   </ItemGroup>
 

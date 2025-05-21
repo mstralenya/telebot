@@ -8,10 +8,10 @@ open Funogram.Telegram
 open Funogram.Telegram.Bot
 open Funogram.Telegram.Types
 open Serilog
+open Telebot.Bus
 open Telebot.LoggingHandler
-open Telebot.Policies
+open Telebot.Messages
 open Telebot.PrometheusMetrics
-open Telebot.Reply
 open Prometheus
 open Suave
 open Suave.Filters
@@ -20,48 +20,21 @@ open Suave.Successful
 
 let updateArrived (ctx: UpdateContext) =
     match ctx.Update.Message with
-    | Some {
-               MessageId = messageId
-               Chat = chat
-               Text = messageText
-           } ->
+    | Some { MessageId = messageId; Chat = chat; Text = messageText } ->
         newMessageCounter.Inc() // Increment new message counter
         let mId = MessageId.Create messageId
         let cId = ChatId.Int chat.Id
 
-        [
-            processTikTokAudios
-            processTikTokVideos
-            processInstagramLinks
-            processInstagramShareLinks
-            processTwitterLinks
-            processYoutubeLinks
-        ]
-        |> List.iter (fun processMessage ->
-            let stopwatch = System.Diagnostics.Stopwatch.StartNew()
-            let mutable isSuccess = false
+        // Create update message
+        let updateMessage = {
+            MessageText = messageText
+            MessageId = mId
+            ChatId = cId
+            Context = ctx
+        }
 
-            try
-                tryThreeTimes (fun () ->
-                    processMessage (messageText, mId, cId, ctx)
-                    isSuccess <- true)
-            finally
-                stopwatch.Stop()
+        sendToBus updateMessage
 
-                match isSuccess with
-                | true -> Log.Debug $"Successfully processed message {messageText}"
-                | false ->
-                    let message =
-                        Req.SendMessage.Make(
-                            cId,
-                            "Failed to process link",
-                            replyParameters = ReplyParameters.Create(messageId, cId),
-                            parseMode = ParseMode.HTML
-                        )
-
-                    sendRequestAsync message ctx |> Async.RunSynchronously
-
-                processingTimeSummary.Observe stopwatch.Elapsed.TotalMilliseconds)
     | _ -> ()
 
 let prometheusEndpoint =
@@ -93,6 +66,9 @@ let main _ =
     Console.OutputEncoding <- Text.Encoding.UTF8
     Log.Logger <- LoggerConfiguration().WriteTo.Console().CreateLogger()
 
+    // Initialize the message bus
+    initializeBus() |> ignore
+
     // Start the metrics server
     let metricsPort =
         Environment.GetEnvironmentVariable "METRICS_PORT"
@@ -120,6 +96,8 @@ let main _ =
         |> Async.RunSynchronously
     finally
         Log.Information "Stopping bot..."
+        // Shutdown the bus
+        shutdownBus()
         Log.Information "Bot stopped"
         Log.CloseAndFlush()
 
