@@ -45,12 +45,12 @@ module private Instagram =
         |> Seq.tryLast
         |> Option.map _.Value
         |> function
-            | Some id when url.Contains "/reel" -> Some(Reel id)
-            | Some id -> Some(Post id)
+            | Some id when url.Contains "/reel" -> id |> Reel |> Some
+            | Some id -> id |> Post |> Some
             | _ -> None
 
     let private getContentPostId postId =
-        KeyValuePair("variables", $"{{\"shortcode\":\"{postId}\",\"fetch_comment_count\":null}}")
+        KeyValuePair("variables", JsonSerializer.Serialize {| shortcode = postId; |})
 
     let private createRequest postId =
         let content = [ getContentPostId postId ] @ urlContent 
