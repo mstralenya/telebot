@@ -6,6 +6,7 @@ open System.Net.Http.Json
 open System.Text.Json
 open System.Text.RegularExpressions
 open System.Collections.Generic
+open System.Threading
 open Serilog
 open Telebot.DataTypes
 open Telebot.Bus
@@ -60,7 +61,10 @@ module private Instagram =
     let private fetchMediaData postId =
         async {
             use request = createRequest postId
+            Log.Information $"executing instagram request {request.RequestUri.ToString}"
             let response = HttpClient.executeRequestAsync request
+            let cancellationToken = CancellationToken.None
+            Log.Information $"fetched instagram data:\n {response.Content.ReadAsStringAsync cancellationToken}"
             return! response.Content.ReadFromJsonAsync<InstagramMediaResponse>() |> Async.AwaitTask
         }
 
@@ -85,8 +89,6 @@ module private Instagram =
     let private downloadReel rId =
         async {
             let! media = fetchMediaData rId
-            
-            Log.Information $"fetched instagram data:\n {media}"
 
             return!
                 media.Data
