@@ -20,18 +20,23 @@ open Suave.Successful
 
 let updateArrived (ctx: UpdateContext) =
     match ctx.Update.Message with
-    | Some { MessageId = messageId; Chat = chat; Text = messageText } ->
+    | Some {
+               MessageId = messageId
+               Chat = chat
+               Text = messageText
+           } ->
         newMessageCounter.Inc() // Increment new message counter
         let mId = MessageId.Create messageId
         let cId = ChatId.Int chat.Id
 
         // Create update message
-        let updateMessage = {
-            MessageText = messageText
-            MessageId = mId
-            ChatId = cId
-            Context = ctx
-        }
+        let updateMessage =
+            {
+                MessageText = messageText
+                MessageId = mId
+                ChatId = cId
+                Context = ctx
+            }
 
         sendToBus updateMessage
 
@@ -67,7 +72,7 @@ let main _ =
     Log.Logger <- LoggerConfiguration().WriteTo.Console().CreateLogger()
 
     // Initialize the message bus
-    initializeBus() |> ignore
+    initializeBus () |> ignore
 
     // Start the metrics server
     let metricsPort =
@@ -97,9 +102,8 @@ let main _ =
     finally
         Log.Information "Stopping bot..."
         // Shutdown the bus
-        shutdownBus()
+        shutdownBus ()
         Log.Information "Bot stopped"
         Log.CloseAndFlush()
 
-    Log.CloseAndFlush()
     0

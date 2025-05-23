@@ -76,9 +76,12 @@ module private Twitter =
 
 type TwitterLinksHandler() =
     inherit BaseHandler()
+
     member private this.extractTwitterLinks =
         createLinkExtractor Twitter.getTwitterLinks TwitterMessage
+
     member this.Handle(msg: UpdateMessage) =
         this.extractTwitterLinks msg |> List.map publishToBus |> ignore
+
     member this.Handle(msg: TwitterMessage) =
         this.processLink msg Twitter.getTwitterReply

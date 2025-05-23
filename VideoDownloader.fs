@@ -26,8 +26,7 @@ let downloadMedia url isVideo =
     }
 
 let deleteFile (filePath: string) =
-    if File.Exists filePath then
-        File.Delete filePath
+    if File.Exists filePath then File.Delete filePath
 
     deleteCounter.Inc()
 
@@ -64,8 +63,7 @@ let getVideoInfo (videoPath: string) =
             System.Text.RegularExpressions.Regex.Match(output, @"(\d+)\n(\d+)\n(\d+)")
 
         if matches.Success then
-            let results =
-                [1..3] |> List.map (fun i -> int64 matches.Groups[i].Value)
+            let results = [ 1..3 ] |> List.map (fun i -> int64 matches.Groups[i].Value)
 
             Log.Information $"Video Info: Duration: {results[2]} seconds, Resolution: {results[1]}x{results[0]}"
             videoSizeSuccessCounter.Inc()
@@ -137,7 +135,7 @@ let getVideoSize (filePath: string) =
 
     let duration, width, height =
         match info with
-        | Some(d, w, h) -> Some d, Some w, Some h
+        | Some (d, w, h) -> Some d, Some w, Some h
         | None -> None, None, None
 
     duration, width, height

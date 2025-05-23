@@ -16,19 +16,14 @@ open Telebot.PrometheusMetrics
 let extractLinks<'T>
     (linkExtractor: string option -> string list)
     (messageConstructor: string -> UpdateMessage -> 'T)
-    (message: UpdateMessage) : 'T list =
+    (message: UpdateMessage)
+    : 'T list =
     linkExtractor message.MessageText
     |> List.map (fun url -> messageConstructor url message)
 
 // Higher-order function to create specialized extractors
-let createLinkExtractor
-    (getLinks   : string option -> string list)
-    (mkMessage  : string * UpdateMessage -> 'T)
-    : UpdateMessage -> 'T list =
-  fun msg ->
-    msg.MessageText
-    |> getLinks
-    |> List.map (fun url -> mkMessage (url, msg))
+let createLinkExtractor (getLinks: string option -> string list) (mkMessage: string * UpdateMessage -> 'T) : UpdateMessage -> 'T list =
+    fun msg -> msg.MessageText |> getLinks |> List.map (fun url -> mkMessage (url, msg))
 
 // shape that is published afterwards
 type ProcessingResult =
@@ -58,38 +53,30 @@ type BaseHandler() =
                 sw.Stop()
 
                 let result =
-                    {   Success = ok
+                    {
+                        Success = ok
                         ElapsedMs = sw.Elapsed.TotalMilliseconds
                         Link = link
-                        Reply = rep }
+                        Reply = rep
+                    }
+
                 publishToBus result
         }
 
-
-
-
-
-
 type ResultHandler =
     // Add parameterless constructor
-    new() = { }
+    new() = {  }
     // Process result handler
     member this.Handle(msg: ProcessingResult) : Task =
         task {
             // Log and record metrics
-            processingTimeSummary.Observe(msg.ElapsedMs)
+            processingTimeSummary.Observe msg.ElapsedMs
 
             if msg.Success then
                 Log.Debug $"Successfully processed link: {msg.Link.Url}"
                 // Send the reply if successful and there is one
                 match msg.Reply with
-                | Some r ->
-                    reply (
-                        r,
-                        msg.Link.OriginalMessage.MessageId,
-                        msg.Link.OriginalMessage.ChatId,
-                        msg.Link.OriginalMessage.Context
-                    )
+                | Some r -> reply (r, msg.Link.OriginalMessage.MessageId, msg.Link.OriginalMessage.ChatId, msg.Link.OriginalMessage.Context)
                 | None -> ()
             else
                 Log.Error $"Failed to process link: {msg.Link.Url}"

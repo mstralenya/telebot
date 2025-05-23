@@ -15,10 +15,14 @@ let initializeBus () =
             .CreateDefaultBuilder()
             .UseWolverine(fun opts ->
                 // Configure local queue
-                opts.LocalQueue("telebot").Sequential().MaximumParallelMessages(20).TelemetryEnabled(true)
+                opts
+                    .LocalQueue("telebot")
+                    .Sequential()
+                    .MaximumParallelMessages(20)
+                    .TelemetryEnabled true
                 |> ignore
 
-                opts.PublishAllMessages().ToLocalQueue("telebot") |> ignore)
+                opts.PublishAllMessages().ToLocalQueue "telebot" |> ignore)
             .Build()
 
     host.Start() |> ignore
@@ -38,9 +42,9 @@ let sendToBus<'T> (message: 'T) =
     task {
         try
             let bus = getBus ()
-            do! bus.SendAsync(message)
-        with ex ->
-            Log.Error(ex, "Error sending message")
+            do! bus.SendAsync message
+        with
+        | ex -> Log.Error(ex, "Error sending message")
     }
     |> Async.AwaitTask
     |> Async.RunSynchronously
@@ -50,9 +54,9 @@ let publishToBus<'T> (message: 'T) =
     task {
         try
             let bus = getBus ()
-            do! bus.PublishAsync(message)
-        with ex ->
-            Log.Error(ex, "Error publishing message")
+            do! bus.PublishAsync message
+        with
+        | ex -> Log.Error(ex, "Error publishing message")
     }
     |> Async.AwaitTask
     |> Async.RunSynchronously

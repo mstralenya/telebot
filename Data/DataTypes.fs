@@ -2,7 +2,10 @@ module Telebot.DataTypes
 
 /// Represents a video file with optional metadata.
 type VideoFile =
-    { File: string; Caption: string option }
+    {
+        File: string
+        Caption: string option
+    }
 
 type GalleryDisplay =
     | Photo of string

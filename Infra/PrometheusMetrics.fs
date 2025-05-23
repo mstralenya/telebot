@@ -61,4 +61,3 @@ let tiktokSuccessMetric =
 
 let tiktokFailureMetric =
     Metrics.CreateCounter("telebot_tiktok_failure", "Number of failed TikTok video downloads")
-

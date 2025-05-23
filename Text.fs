@@ -10,8 +10,6 @@ open Serilog
 open Telebot.DataTypes
 open Telebot.VideoDownloader
 
-
-
 module Reply =
     let createVideoFileWithCaption file caption =
         VideoFile { File = file; Caption = caption }
