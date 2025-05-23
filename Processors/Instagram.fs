@@ -6,6 +6,7 @@ open System.Net.Http.Json
 open System.Text.Json
 open System.Text.RegularExpressions
 open System.Collections.Generic
+open Serilog
 open Telebot.DataTypes
 open Telebot.Bus
 open Telebot.Handlers
@@ -84,6 +85,8 @@ module private Instagram =
     let private downloadReel rId =
         async {
             let! media = fetchMediaData rId
+            
+            Log.Information $"fetched instagram data:\n {media}"
 
             return!
                 media.Data
