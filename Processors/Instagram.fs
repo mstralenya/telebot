@@ -64,7 +64,7 @@ module private Instagram =
     let private fetchMediaData postId =
         async {
             use request = createRequest postId
-            let response = HttpClient.executeRequestAsync request
+            let! response = Telebot.HttpClient.executeRequestAsync request
             let cancellationToken = CancellationToken.None
             Log.Information $"fetched instagram data:\n {response.StatusCode} \n {response.Content.ReadAsStringAsync cancellationToken}"
             return! response.Content.ReadFromJsonAsync<InstagramMediaResponse>() |> Async.AwaitTask
@@ -79,7 +79,7 @@ module private Instagram =
 
     let private getRealInstagramUrl (shareUrl: string) =
         async {
-            let response = HttpClient.getAsync shareUrl
+            let! response = Telebot.HttpClient.getAsync shareUrl
 
             if response.IsSuccessStatusCode then
                 let realUrl = response.RequestMessage.RequestUri.ToString()
@@ -98,10 +98,10 @@ module private Instagram =
                 |> Option.bind _.VideoUrl
                 |> function
                     | Some url ->
-                        let gallery =
-                            [| downloadMedia url true |] |> Async.Parallel |> Async.RunSynchronously
-
-                        async { return Reply.createGallery gallery None }
+                        async {
+                            let! gallery = [| downloadMediaAsync url true |] |> Async.Parallel
+                            return Reply.createGallery gallery None
+                        }
                     | None -> async { return Reply.createMessage "Failed to download reel" }
         }
 
@@ -122,13 +122,13 @@ module private Instagram =
                                 else
                                     e.Node.DisplayUrl
 
-                            downloadMedia downloadUrl e.Node.IsVideo)
+                            downloadMediaAsync downloadUrl e.Node.IsVideo)
                         |> Async.Parallel
                     | _ ->
                         let url = if xdt.IsVideo then xdt.VideoUrl else xdt.ImageUrl
 
                         match url with
-                        | Some u -> [| downloadMedia u xdt.IsVideo |]
+                        | Some u -> [| downloadMediaAsync u xdt.IsVideo |]
                         | None -> [||]
                         |> Async.Parallel
 
@@ -136,9 +136,9 @@ module private Instagram =
             | None -> return Reply.createMessage "Failed to download post"
         }
 
-    let getInstagramReply url =
-        let result =
-            async {
+    let getInstagramReplyAsync url =
+        async {
+            try
                 match url with
                 | PostType(Reel id) ->
                     let! res = downloadReel id
@@ -147,41 +147,59 @@ module private Instagram =
                     let! res = downloadPost id
                     return Success res
                 | _ -> return InvalidUrl
-            }
-            |> Async.RunSynchronously
+            with
+            | ex ->
+                Log.Error(ex, "Error processing Instagram URL: {Url}", url)
+                return DownloadError ex.Message
+        }
 
-        match result with
-        | Success reply ->
-            instagramSuccessCounter.Inc()
-            Some reply
-        | InvalidUrl ->
-            instagramMissingVideoIdCounter.Inc()
-            Some(Reply.createMessage "Invalid Instagram URL")
-        | DownloadError msg ->
-            instagramFailureCounter.Inc()
-            Some(Reply.createMessage msg)
+    let getInstagramReply url =
+        async {
+            let! result = getInstagramReplyAsync url
+            match result with
+            | Success reply ->
+                instagramSuccessCounter.Inc()
+                return Some reply
+            | InvalidUrl ->
+                instagramMissingVideoIdCounter.Inc()
+                return Some(Reply.createMessage "Invalid Instagram URL")
+            | DownloadError msg ->
+                instagramFailureCounter.Inc()
+                return Some(Reply.createMessage msg)
+        }
+
+    let getInstagramReplySync url =
+        getInstagramReply url |> Async.RunSynchronously
+
+    let getInstagramShareReplyAsync url =
+        async {
+            let! realUrl = getRealInstagramUrl url
+            return! getInstagramReply realUrl
+        }
 
     let getInstagramShareReply url =
-        let realUrl = getRealInstagramUrl url |> Async.RunSynchronously
-        getInstagramReply realUrl
+        getInstagramShareReplyAsync url |> Async.RunSynchronously
+
+    let getInstagramShareReplySync url =
+        getInstagramShareReply url
 
 
 type InstagramLinksHandler() =
     inherit BaseHandler()
     member private this.getInstagramShareLinks (message: string option) = getLinks Instagram.shareRegex message
     member private this.getInstagramLinks (message: string option) = getLinks Instagram.postRegex message
-      member private this.extractInstagramShareLinks =
+    member private this.extractInstagramShareLinks =
         createLinkExtractor this.getInstagramShareLinks InstagramShareMessage
     member private this.extractInstagramLinks =
         createLinkExtractor this.getInstagramLinks InstagramMessage
     [<WolverineHandler>]
     member this.HandleLinks(msg: UpdateMessage) =
-        this.extractInstagramLinks msg |> List.map publishToBus |> ignore
+        this.extractInstagramLinks msg |> List.map (publishToBusAsync >> Async.RunSynchronously) |> ignore
     [<WolverineHandler>]
     member this.HandleShareLinks(msg: UpdateMessage) =
-        this.extractInstagramShareLinks msg |> List.map publishToBus |> ignore
+        this.extractInstagramShareLinks msg |> List.map (publishToBusAsync >> Async.RunSynchronously) |> ignore
     member this.Handle(msg: InstagramMessage) =
-        this.processLink msg Instagram.getInstagramReply
+        this.processLink msg Instagram.getInstagramReplySync
     member this.Handle(msg: InstagramShareMessage) =
-        this.processLink msg Instagram.getInstagramShareReply
+        this.processLink msg Instagram.getInstagramShareReplySync
     
