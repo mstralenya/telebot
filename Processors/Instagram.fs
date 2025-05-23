@@ -53,7 +53,7 @@ module private Instagram =
         KeyValuePair("variables", $"{{\"shortcode\":\"{postId}\",\"fetch_comment_count\":null}}")
 
     let private createRequest postId =
-        let content = urlContent @ [ getContentPostId postId ]
+        let content = [ getContentPostId postId ] @ urlContent 
         let request = new HttpRequestMessage(HttpMethod.Post, Constants.ApiEndpoint)
         request.Content <- new FormUrlEncodedContent(content)
         headers |> Seq.iter (fun kv -> request.Headers.Add(kv.Key, kv.Value))
