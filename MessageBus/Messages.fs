@@ -3,7 +3,7 @@ module Telebot.Messages
 open Funogram.Telegram.Bot
 open Funogram.Telegram.Types
 open Telebot.DataTypes
-open Telebot.Text
+open Wolverine.Attributes
 
 // Base message type for Telegram updates
 type UpdateMessage =
@@ -16,9 +16,13 @@ type UpdateMessage =
 
 
 // Different message types for specific link types
-[<AbstractClass>]
 type Message(url: string, originalMessage: UpdateMessage) =
+    do 
+        if typeof<Message>.IsAssignableFrom(typedefof<Message>) && 
+           obj.ReferenceEquals(typeof<Message>, _.GetType()) then
+            invalidOp "Message class should not be instantiated directly"
     /// The public URL associated with the message.
+    [<Audit>]
     member _.Url: string = url
     /// The original incoming `UpdateMessage`.
     member _.OriginalMessage: UpdateMessage = originalMessage

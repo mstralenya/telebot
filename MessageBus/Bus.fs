@@ -2,6 +2,7 @@ module Telebot.Bus
 
 open Microsoft.Extensions.DependencyInjection
 open Microsoft.Extensions.Hosting
+open Microsoft.Extensions.Logging
 open Wolverine
 open Serilog
 
@@ -21,11 +22,11 @@ let initializeBus () =
                     .MaximumParallelMessages(20)
                     .TelemetryEnabled true
                 |> ignore
-
+                opts.Policies.LogMessageStarting(LogLevel.Information);
                 opts.PublishAllMessages().ToLocalQueue "telebot" |> ignore)
             .Build()
 
-    host.Start() |> ignore
+    host.Start()
     busHost <- Some host
     host
 

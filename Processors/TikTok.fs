@@ -9,6 +9,8 @@ open Telebot.Messages
 open Telebot.Text
 open Telebot.Text.Reply
 open Telebot.VideoDownloader
+open Wolverine.Attributes
+
 module private TikTok =
     let private getJsonToken (json: JObject) token =
         json.SelectToken token
@@ -80,16 +82,16 @@ type TikTokAudioLinksHandler() =
     inherit BaseHandler()
     member private this.extractTikTokAudioLinks =
         createLinkExtractor TikTok.getTikTokAudioLinks TikTokAudioMessage
-    member this.Handle(msg: UpdateMessage) =
-        this.extractTikTokAudioLinks msg |> List.map publishToBus |> ignore
-    member this.Handle(msg: TikTokAudioMessage) =
-        this.processLink msg (TikTok.getTikTokReply false)
-
-type TikTokVideoLinksHandler() =
-    inherit BaseHandler()
     member private this.extractTikTokVideoLinks =
         createLinkExtractor TikTok.getTikTokVideoLinks TikTokVideoMessage
-    member this.Handle(msg: UpdateMessage) =
+    [<WolverineHandler>]
+    member this.HandleAudioLinks(msg: UpdateMessage) =
+        this.extractTikTokAudioLinks msg |> List.map publishToBus |> ignore
+    [<WolverineHandler>]
+    member this.HandleVideoLinks(msg: UpdateMessage) =
         this.extractTikTokVideoLinks msg |> List.map publishToBus |> ignore
+    member this.Handle(msg: TikTokAudioMessage) =
+        this.processLink msg (TikTok.getTikTokReply false)    
     member this.Handle(msg: TikTokVideoMessage) =
         this.processLink msg (TikTok.getTikTokReply true)
+

@@ -16,6 +16,7 @@ open Telebot.Messages
 open Telebot.PrometheusMetrics
 open Telebot.Text
 open Telebot.VideoDownloader
+open Wolverine.Attributes
 
 module private Constants =
     [<Literal>]
@@ -166,20 +167,20 @@ module private Instagram =
 
 type InstagramLinksHandler() =
     inherit BaseHandler()
+    member private this.getInstagramShareLinks (message: string option) = getLinks Instagram.shareRegex message
     member private this.getInstagramLinks (message: string option) = getLinks Instagram.postRegex message
+      member private this.extractInstagramShareLinks =
+        createLinkExtractor this.getInstagramShareLinks InstagramShareMessage
     member private this.extractInstagramLinks =
         createLinkExtractor this.getInstagramLinks InstagramMessage
-    member this.Handle(msg: UpdateMessage) =
+    [<WolverineHandler>]
+    member this.HandleLinks(msg: UpdateMessage) =
         this.extractInstagramLinks msg |> List.map publishToBus |> ignore
+    [<WolverineHandler>]
+    member this.HandleShareLinks(msg: UpdateMessage) =
+        this.extractInstagramShareLinks msg |> List.map publishToBus |> ignore
     member this.Handle(msg: InstagramMessage) =
         this.processLink msg Instagram.getInstagramReply
-
-type InstagramShareLinksHandler() =
-    inherit BaseHandler()
-    member private this.getInstagramShareLinks (message: string option) = getLinks Instagram.shareRegex message
-    member private this.extractInstagramShareLinks =
-        createLinkExtractor this.getInstagramShareLinks InstagramShareMessage
-    member this.Handle(msg: UpdateMessage) =
-        this.extractInstagramShareLinks msg |> List.map publishToBus |> ignore
     member this.Handle(msg: InstagramShareMessage) =
         this.processLink msg Instagram.getInstagramShareReply
+    
