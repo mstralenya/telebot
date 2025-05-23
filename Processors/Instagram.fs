@@ -56,12 +56,12 @@ module private Instagram =
         let request = new HttpRequestMessage(HttpMethod.Post, Constants.ApiEndpoint)
         request.Content <- new FormUrlEncodedContent(content)
         headers |> Seq.iter (fun kv -> request.Headers.Add(kv.Key, kv.Value))
+        Log.Information $"created instagram request {JsonSerializer.Serialize request}"
         request
 
     let private fetchMediaData postId =
         async {
             use request = createRequest postId
-            Log.Information $"executing instagram request {request.RequestUri.ToString}"
             let response = HttpClient.executeRequestAsync request
             let cancellationToken = CancellationToken.None
             Log.Information $"fetched instagram data:\n {response.Content.ReadAsStringAsync cancellationToken}"
