@@ -225,7 +225,7 @@ let extractThumbnailAsync (videoPath: string) (outputPath: string) : Async<bool>
 
 // Backward compatibility synchronous version
 let extractThumbnail (videoPath: string) (outputPath: string) =
-    extractThumbnailAsync videoPath outputPath |> Async.RunSynchronously |> ignore
+    extractThumbnailAsync videoPath outputPath |> Async.RunSynchronously
 
 // Utility functions
 let getThumbnailName (videoPath: string) = $"{videoPath}.jpg"
@@ -241,8 +241,9 @@ let getVideoThumbnailAsync (videoPath: string) : Async<string option> =
 // Backward compatibility synchronous version
 let getVideoThumbnail (videoPath: string) =
     let thumbnailFilename = getThumbnailName videoPath
-    extractThumbnail videoPath thumbnailFilename
-    thumbnailFilename
+    match extractThumbnail videoPath thumbnailFilename with
+    | true -> Some thumbnailFilename
+    | false -> None
 
 // Get video size asynchronously
 let getVideoSizeAsync (filePath: string) : Async<int64 option * int64 option * int64 option> =

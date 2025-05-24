@@ -81,6 +81,8 @@ let private sendVideoWithThumbnail
     (ctx: UpdateContext)
     =
     let videoFile, thumbFile, duration, width, height = getVideoInputFile videoPath
+     
+    let file = if thumbFile.IsSome then Some(InputFile.File(thumbFile.Value, File.OpenRead thumbFile.Value)) else None
 
     let req =
         Req.SendVideo.Make(
@@ -91,7 +93,7 @@ let private sendVideoWithThumbnail
             showCaptionAboveMedia = true,
             disableNotification = true,
             supportsStreaming = true,
-            thumbnail = InputFile.File(thumbFile, File.OpenRead thumbFile),
+            ?thumbnail = file,
             ?width = width,
             ?height = height,
             ?duration = duration,
@@ -127,7 +129,7 @@ let private createMediaInput (media: GalleryDisplay) =
                 ?duration = duration,
                 ?width = width,
                 ?height = height,
-                thumbnail = thumbFile
+                ?thumbnail = thumbFile
             )
         )
 
