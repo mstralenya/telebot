@@ -1,8 +1,8 @@
 ﻿FROM mcr.microsoft.com/dotnet/aspnet:9.0 AS base
 # Install FFmpeg using apk
-RUN apk update && \
-    apk add --no-cache ffmpeg && \
-    rm -rf /var/cache/apk/*
+RUN apt-get update && \
+    apt-get install -y ffmpeg && \
+    rm -rf /var/lib/apt/lists/*
 USER $APP_UID
 WORKDIR /app
 
