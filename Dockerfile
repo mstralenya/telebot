@@ -1,4 +1,4 @@
-﻿FROM mcr.microsoft.com/dotnet/runtime:9.0-alpine AS base
+﻿FROM mcr.microsoft.com/dotnet/aspnet:9.0-alpine AS base
 # Install FFmpeg using apk
 RUN apk update && \
     apk add --no-cache ffmpeg && \
