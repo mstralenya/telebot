@@ -1,6 +1,7 @@
 ﻿module Telebot.Youtube
 
 open System
+open System.Linq
 open System.Text.RegularExpressions
 open Serilog
 open Telebot.Bus
@@ -58,11 +59,17 @@ module private Youtube =
             Log.Information
                 $"Audio Stream options: %A{streamManifest.GetAudioOnlyStreams()
                                            |> Seq.toList
-                                           |> List.map (fun x -> x.Container, x.Bitrate, x.Size, x.AudioCodec)}"
+                                           |> List.map (fun x -> x.Container, x.Bitrate, x.Size, x.AudioCodec, x.IsAudioLanguageDefault)}"
 
             // Get the best video stream (e.g., highest quality)
+            let allAudioStreams = streamManifest.GetAudioOnlyStreams() |> Seq.filter (fun c -> c.Size.MegaBytes < 8)
+                
+            let defaultAudioStreams = allAudioStreams |> Seq.filter (fun a -> a.IsAudioLanguageDefault.HasValue && a.IsAudioLanguageDefault.Value = true)
+            
+            let usableStreams = if defaultAudioStreams.Any() then defaultAudioStreams else allAudioStreams
+            
             let audioStream =
-                streamManifest.GetAudioOnlyStreams()
+                usableStreams
                 |> Seq.filter (fun c -> c.Size.MegaBytes < 8)
                 |> tryMaxBy _.Bitrate.KiloBitsPerSecond
 
