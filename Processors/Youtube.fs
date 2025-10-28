@@ -99,6 +99,10 @@ module private Youtube =
         filesize_approx: int64 option
         width: int option
         height: int option
+        language: string option // language code for the stream, if provided
+        audio_is_original: bool option // whether this audio track is marked as original
+        audio_track_id: string option // yt-dlp's audio_track.id if present
+        audio_track_name: string option // e.g., "Original audio", "Dub" if present
     }
 
     let private tryGet (tok: JToken) (name: string) =
@@ -138,6 +142,38 @@ module private Youtube =
                         match Int32.TryParse(string v) with
                         | true, d -> Some d
                         | _ -> None
+                // Some extractors use 'language', others 'lang', occasionally nested under 'audio_lang'
+                let lang =
+                    match f.SelectToken("language") with
+                    | null ->
+                        match f.SelectToken("lang") with
+                        | null ->
+                            match f.SelectToken("audio_lang") with
+                            | null -> None
+                            | v when v.Type = JTokenType.Null -> None
+                            | v -> Some (string v)
+                        | v when v.Type = JTokenType.Null -> None
+                        | v -> Some (string v)
+                    | v when v.Type = JTokenType.Null -> None
+                    | v -> Some (string v)
+                let atId =
+                    match f.SelectToken("audio_track.id") with
+                    | null -> None
+                    | v when v.Type = JTokenType.Null -> None
+                    | v -> Some (string v)
+                let atName =
+                    match f.SelectToken("audio_track.name") with
+                    | null -> None
+                    | v when v.Type = JTokenType.Null -> None
+                    | v -> Some (string v)
+                let isOrig =
+                    let low s = if String.IsNullOrWhiteSpace(s) then "" else s.ToLowerInvariant()
+                    let n = atName |> Option.defaultValue "" |> low
+                    let i = atId |> Option.defaultValue "" |> low
+                    let l = lang |> Option.defaultValue "" |> low
+                    let hasOrig = n.Contains("original") || i = "original" || l = "original"
+                    let looksDub = n.Contains("dub") || n.Contains("description") || n.Contains("commentary") || n.Contains("narration")
+                    if hasOrig && not looksDub then Some true else None
                 Some {
                     format_id = str "format_id" |> Option.defaultValue ""
                     ext = str "ext"
@@ -150,6 +186,10 @@ module private Youtube =
                     filesize_approx = int64Opt "filesize_approx"
                     width = intOpt "width"
                     height = intOpt "height"
+                    language = lang
+                    audio_is_original = isOrig
+                    audio_track_id = atId
+                    audio_track_name = atName
                 }
             with _ -> None)
 
@@ -189,8 +229,23 @@ module private Youtube =
         // Order videos by preference
         let orderedVideos = videos |> Array.sortByDescending score
         let orderedAudios =
+            let originalScore (a: YtFormat) =
+                let low (s:string) = if String.IsNullOrWhiteSpace(s) then "" else s.ToLowerInvariant()
+                match a.audio_is_original with
+                | Some true -> 3
+                | _ ->
+                    let n = a.audio_track_name |> Option.defaultValue "" |> low
+                    let i = a.audio_track_id |> Option.defaultValue "" |> low
+                    let l = a.language |> Option.defaultValue "" |> low
+                    let hasOrig = n.Contains("original") || i = "original" || l = "original"
+                    let looksDub = n.Contains("dub") || n.Contains("description") || n.Contains("commentary") || n.Contains("narration")
+                    if hasOrig && not looksDub then 2
+                    elif looksDub then -1
+                    else 0
             audios
-            |> Array.sortByDescending (fun a -> (defaultArg a.abr (defaultArg a.tbr 0.0)), (if a.ext = Some "m4a" then 1 else 0))
+            |> Array.sortByDescending (fun a ->
+                let abrOrTbr = defaultArg a.abr (defaultArg a.tbr 0.0)
+                (originalScore a, abrOrTbr, if a.ext = Some "m4a" then 1 else 0))
         // Try combinations until under limit
         let mutable chosen : (YtFormat * YtFormat * int64 option) option = None
         for v in orderedVideos do
