@@ -166,13 +166,37 @@ module private Youtube =
                     | null -> None
                     | v when v.Type = JTokenType.Null -> None
                     | v -> Some (string v)
+                let note =
+                    match f.SelectToken("format_note") with
+                    | null -> None
+                    | v when v.Type = JTokenType.Null -> None
+                    | v -> Some (string v)
+                let formatStr =
+                    match f.SelectToken("format") with
+                    | null -> None
+                    | v when v.Type = JTokenType.Null -> None
+                    | v -> Some (string v)
+                let urlStr =
+                    match f.SelectToken("url") with
+                    | null -> None
+                    | v when v.Type = JTokenType.Null -> None
+                    | v -> Some (string v)
                 let isOrig =
                     let low s = if String.IsNullOrWhiteSpace(s) then "" else s.ToLowerInvariant()
                     let n = atName |> Option.defaultValue "" |> low
                     let i = atId |> Option.defaultValue "" |> low
                     let l = lang |> Option.defaultValue "" |> low
-                    let hasOrig = n.Contains("original") || i = "original" || l = "original"
-                    let looksDub = n.Contains("dub") || n.Contains("description") || n.Contains("commentary") || n.Contains("narration")
+                    let fn = note |> Option.defaultValue "" |> low
+                    let fmt = formatStr |> Option.defaultValue "" |> low
+                    let u = urlStr |> Option.defaultValue "" |> low
+                    // Detect "original" from multiple possible places: audio_track, language, format_note, format string, or URL xtags (acont=original)
+                    let hasOrig =
+                        n.Contains("original") || i = "original" || l = "original" ||
+                        fn.Contains("original") || fmt.Contains("original") ||
+                        u.Contains("acont%3Doriginal") || u.Contains("acont=original")
+                    // Try to avoid commentary/dub tracks even if marked original in some fields
+                    let looksDub =
+                        n.Contains("dub") || n.Contains("description") || n.Contains("commentary") || n.Contains("narration") || fn.Contains("dub")
                     if hasOrig && not looksDub then Some true else None
                 Some {
                     format_id = str "format_id" |> Option.defaultValue ""
