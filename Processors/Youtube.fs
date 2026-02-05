@@ -13,6 +13,7 @@ open Telebot.Handlers
 open Telebot.Messages
 open Telebot.Text
 open Telebot.Text.Reply
+open Wolverine.Attributes
 
 module private Youtube =
     let private youtubeRegex =
@@ -21,7 +22,15 @@ module private Youtube =
             RegexOptions.Compiled
         )
 
-    let getYoutubeLinks (message: string option) = getLinks youtubeRegex message
+    let getYoutubeAudioLinks (message: string option) =
+        match message with
+        | Some text when text.IndexOf("audio", StringComparison.OrdinalIgnoreCase) >= 0 -> getLinks youtubeRegex message
+        | _ -> List.empty
+
+    let getYoutubeVideoLinks (message: string option) =
+        match message with
+        | Some text when text.IndexOf("audio", StringComparison.OrdinalIgnoreCase) < 0 -> getLinks youtubeRegex message
+        | _ -> List.empty
 
     let private runProcess (fileName: string) (args: string) (workingDir: string option) : int * string * string =
         try
@@ -479,12 +488,46 @@ module private Youtube =
         }
         |> Async.RunSynchronously
 
+    let getYoutubeAudioReply (url: string) =
+        async {
+            match getJson url with
+            | None ->
+                let msg = createMessage "Failed to fetch video info"
+                return Some msg
+            | Some json ->
+                let id = json.SelectToken("id") |> Option.ofObj |> Option.map string |> Option.defaultValue (Guid.NewGuid().ToString("N"))
+                let formats = parseFormats json
+                let audios = formats |> Array.filter (fun f -> f.acodec |> Option.exists (fun a -> a <> "none") && f.vcodec |> Option.exists (fun v -> v = "none"))
+                if audios.Length = 0 then
+                    return Some (createMessage "No audio-only formats found")
+                else
+                    let best = audios |> Array.sortByDescending (fun a -> defaultArg a.abr 0.0) |> Array.head
+                    let ext = defaultArg best.ext "m4a"
+                    let fileName = $"yt_{id}_{Guid.NewGuid()}.{ext}"
+                    let args = $"-f {best.format_id} -o \"{fileName}\" \"{url}\""
+                    let code, _o, e = runProcess ytDlpExe args None
+                    if code <> 0 || not (File.Exists fileName) then
+                        Log.Error("yt-dlp audio download failed: {err}", e)
+                        return Some (createMessage "Failed to download audio")
+                    else
+                        return Some (createAudioFile fileName)
+        }
+        |> Async.RunSynchronously
+
 
 type YoutubeLinksHandler() =
     inherit BaseHandler()
-    member private this.extractYoutubeLinks =
-        createLinkExtractor Youtube.getYoutubeLinks YoutubeMessage
-    member this.Handle(msg: UpdateMessage) =
-        this.extractYoutubeLinks msg |> List.map publishToBus |> ignore
+    member private this.extractYoutubeAudioLinks =
+        createLinkExtractor Youtube.getYoutubeAudioLinks YoutubeAudioMessage
+    member private this.extractYoutubeVideoLinks =
+        createLinkExtractor Youtube.getYoutubeVideoLinks YoutubeMessage
+    [<WolverineHandler>]
+    member this.HandleAudioLinks(msg: UpdateMessage) =
+        this.extractYoutubeAudioLinks msg |> List.map (publishToBusAsync >> Async.RunSynchronously) |> ignore
+    [<WolverineHandler>]
+    member this.HandleVideoLinks(msg: UpdateMessage) =
+        this.extractYoutubeVideoLinks msg |> List.map (publishToBusAsync >> Async.RunSynchronously) |> ignore
+    member this.Handle(msg: YoutubeAudioMessage) =
+        this.processLink msg (Youtube.getYoutubeAudioReply)
     member this.Handle(msg: YoutubeMessage) =
         this.processLink msg Youtube.getYoutubeReply

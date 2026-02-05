@@ -1,6 +1,8 @@
 ﻿module Telebot.Instagram
 
+open System
 open System.IO
+open System.Diagnostics
 open System.Net.Http
 open System.Net.Http.Json
 open System.Text.Json
@@ -183,23 +185,110 @@ module private Instagram =
     let getInstagramShareReplySync url =
         getInstagramShareReply url
 
+    // Audio extraction: download video then extract audio via ffmpeg
+    let private extractAudioFromVideoAsync (videoUrl: string) (id: string option) =
+        async {
+            try
+                let name = Guid.NewGuid().ToString("N")
+                let defaultId = defaultArg id "noid"
+                let outVideo = $"ig_{defaultId}_{name}.mp4"
+                do! downloadFileAsync videoUrl outVideo
+                let outAudio = Path.ChangeExtension(outVideo, ".mp3")
+
+                let psi = ProcessStartInfo()
+                psi.FileName <- "ffmpeg"
+                psi.Arguments <- $"-y -i \"{outVideo}\" -vn -acodec libmp3lame -q:a 2 \"{outAudio}\""
+                psi.UseShellExecute <- false
+                psi.RedirectStandardOutput <- true
+                psi.RedirectStandardError <- true
+                psi.CreateNoWindow <- true
+
+                use p = new Process()
+                p.StartInfo <- psi
+                let started = p.Start()
+                if not started then
+                    try deleteFile outVideo with _ -> ()
+                    return Choice2Of2 "Failed to start ffmpeg"
+                else
+                    p.WaitForExit()
+                    if p.ExitCode = 0 && File.Exists outAudio then
+                        try deleteFile outVideo with _ -> ()
+                        return Choice1Of2 outAudio
+                    else
+                        try deleteFile outVideo with _ -> ()
+                        try deleteFile outAudio with _ -> ()
+                        return Choice2Of2 "ffmpeg failed to extract audio"
+            with ex ->
+                return Choice2Of2 ex.Message
+        }
+
+    let getInstagramAudioReplyAsync url =
+        async {
+            try
+                match url with
+                | PostType(Reel id) ->
+                    let! media = fetchMediaData id
+                    match media.Data |> Option.bind _.InstagramXdt |> Option.bind _.VideoUrl with
+                    | Some vurl ->
+                        let! res = extractAudioFromVideoAsync vurl (Some id)
+                        match res with
+                        | Choice1Of2 audioPath -> return Some (Reply.createAudioFile audioPath)
+                        | Choice2Of2 msg -> return Some (Reply.createMessage msg)
+                    | None -> return Some (Reply.createMessage "Failed to find video for reel")
+                | PostType(Post id) ->
+                    let! media = fetchMediaData id
+                    match media.Data |> Option.bind (fun d -> d.InstagramXdt) with
+                    | Some xdt ->
+                        let videoUrl = if xdt.IsVideo then xdt.VideoUrl else None
+                        match videoUrl with
+                        | Some vurl ->
+                            let! res = extractAudioFromVideoAsync vurl (Some id)
+                            match res with
+                            | Choice1Of2 audioPath -> return Some (Reply.createAudioFile audioPath)
+                            | Choice2Of2 msg -> return Some (Reply.createMessage msg)
+                        | None -> return Some (Reply.createMessage "No video to extract audio from")
+                    | None -> return Some (Reply.createMessage "Failed to fetch post info")
+                | _ -> return Some (Reply.createMessage "Invalid Instagram URL for audio extraction")
+            with ex -> return Some (Reply.createMessage ex.Message)
+        }
+
+    let getInstagramAudioReply url =
+        getInstagramAudioReplyAsync url |> Async.RunSynchronously
+
 
 type InstagramLinksHandler() =
     inherit BaseHandler()
     member private this.getInstagramShareLinks (message: string option) = getLinks Instagram.shareRegex message
     member private this.getInstagramLinks (message: string option) = getLinks Instagram.postRegex message
+    member private this.getInstagramAudioLinks (message: string option) =
+        match message with
+        | Some text when text.IndexOf("audio", System.StringComparison.OrdinalIgnoreCase) >= 0 -> getLinks Instagram.postRegex message
+        | _ -> List.empty
+    member private this.getInstagramVideoLinks (message: string option) =
+        match message with
+        | Some text when text.IndexOf("audio", System.StringComparison.OrdinalIgnoreCase) < 0 -> getLinks Instagram.postRegex message
+        | _ -> List.empty
     member private this.extractInstagramShareLinks =
         createLinkExtractor this.getInstagramShareLinks InstagramShareMessage
     member private this.extractInstagramLinks =
         createLinkExtractor this.getInstagramLinks InstagramMessage
+    member private this.extractInstagramAudioLinks =
+        createLinkExtractor this.getInstagramAudioLinks InstagramAudioMessage
+    member private this.extractInstagramVideoLinks =
+        createLinkExtractor this.getInstagramVideoLinks InstagramMessage
     [<WolverineHandler>]
     member this.HandleLinks(msg: UpdateMessage) =
-        this.extractInstagramLinks msg |> List.map (publishToBusAsync >> Async.RunSynchronously) |> ignore
+        this.extractInstagramVideoLinks msg |> List.map (publishToBusAsync >> Async.RunSynchronously) |> ignore
     [<WolverineHandler>]
     member this.HandleShareLinks(msg: UpdateMessage) =
         this.extractInstagramShareLinks msg |> List.map (publishToBusAsync >> Async.RunSynchronously) |> ignore
+    [<WolverineHandler>]
+    member this.HandleAudioLinks(msg: UpdateMessage) =
+        this.extractInstagramAudioLinks msg |> List.map (publishToBusAsync >> Async.RunSynchronously) |> ignore
     member this.Handle(msg: InstagramMessage) =
         this.processLink msg Instagram.getInstagramReplySync
     member this.Handle(msg: InstagramShareMessage) =
         this.processLink msg Instagram.getInstagramShareReplySync
+    member this.Handle(msg: InstagramAudioMessage) =
+        this.processLink msg Instagram.getInstagramAudioReply
     

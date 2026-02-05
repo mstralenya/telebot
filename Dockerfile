@@ -1,10 +1,10 @@
-﻿FROM mcr.microsoft.com/dotnet/aspnet:9.0-alpine AS base
+﻿FROM mcr.microsoft.com/dotnet/aspnet:10.0-alpine AS base
 # Install FFmpeg and yt-dlp using apk
-RUN apk add --no-cache ffmpeg yt-dlp
+RUN apk add --no-cache ffmpeg yt-dlp deno
 USER $APP_UID
 WORKDIR /app
 
-FROM mcr.microsoft.com/dotnet/sdk:9.0-alpine AS build
+FROM mcr.microsoft.com/dotnet/sdk:10.0-alpine AS build
 ARG BUILD_CONFIGURATION=Release
 WORKDIR /src
 COPY ["telebot.fsproj", "./"]

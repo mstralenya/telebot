@@ -34,12 +34,12 @@ module private TikTok =
 
     let getTikTokAudioLinks (message: string option) =
         match message with
-        | Some text when text.Contains "audio" -> getLinks tikTokRegex message
+        | Some text when text.IndexOf("audio", System.StringComparison.OrdinalIgnoreCase) >= 0 -> getLinks tikTokRegex message
         | _ -> List.empty
 
     let getTikTokVideoLinks (message: string option) =
         match message with
-        | Some text when not (text.Contains "audio") -> getLinks tikTokRegex message
+        | Some text when text.IndexOf("audio", System.StringComparison.OrdinalIgnoreCase) < 0 -> getLinks tikTokRegex message
         | _ -> List.empty
 
     let private getAudioReply url =

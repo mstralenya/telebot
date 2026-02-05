@@ -37,6 +37,9 @@ type TikTokVideoMessage(url, originalMessage) =
 type InstagramMessage(url, originalMessage) =
     inherit Message(url, originalMessage)
 
+type InstagramAudioMessage(url, originalMessage) =
+    inherit Message(url, originalMessage)
+
 type InstagramShareMessage(url, originalMessage) =
     inherit Message(url, originalMessage)
 
@@ -44,6 +47,9 @@ type TwitterMessage(url, originalMessage) =
     inherit Message(url, originalMessage)
 
 type YoutubeMessage(url, originalMessage) =
+    inherit Message(url, originalMessage)
+
+type YoutubeAudioMessage(url, originalMessage) =
     inherit Message(url, originalMessage)
 
 
