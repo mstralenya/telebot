@@ -4,10 +4,15 @@ open System.Net.Http
 open System.Threading
 open System.Threading.Tasks
 open Serilog
+open System.Text.RegularExpressions
 
 type SerilogLogger() =
     interface Funogram.Types.IBotLogger with
-        member _.Log text = Log.Information text
+        member _.Log text = 
+            try
+                Log.Information(Regex.Unescape text)
+            with _ ->
+                Log.Information text
         member _.Enabled = true
 
 type LoggingHandler(innerHandler: HttpMessageHandler) =
