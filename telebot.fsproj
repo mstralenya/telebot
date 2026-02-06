@@ -25,6 +25,7 @@
     <Compile Include="Infra\PrometheusMetrics.fs" />
     <Compile Include="Infra\TelemetryService.fs" />
     <Compile Include="Infra\LoggingHandler.fs" />
+    <Compile Include="Infra\Blacklist.fs" />
     <Compile Include="Infra\Policies.fs" />
     <Compile Include="Helpers.fs" />
     <Compile Include="HttpClient.fs" />

@@ -62,6 +62,12 @@ let updateArrivedAsync (ctx: UpdateContext) : Async<unit> =
                    Text = messageText
                    From = user
                } ->
+            // Check blacklist
+            let userId = user |> Option.map (fun u -> u.Id)
+            if Telebot.Blacklist.isBlacklisted chat.Id userId then
+               Log.Information($"Message ignored due to blacklist. ChatId: {chat.Id}, UserId: {userId}")
+               return ()
+            else
 
             // Create telemetry context
             let chatIdStr = chat.Id.ToString()
