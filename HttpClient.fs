@@ -1,4 +1,4 @@
-﻿module Telebot.HttpClient
+module Telebot.HttpClient
 
 open System
 open System.Diagnostics
@@ -21,6 +21,7 @@ module private Constants =
 let private retryPolicy =
     HttpPolicyExtensions
         .HandleTransientHttpError()
+        .Or<Polly.Timeout.TimeoutRejectedException>()
         .WaitAndRetryAsync(
             retryCount = 3,
             sleepDurationProvider = fun retryAttempt -> TimeSpan.FromSeconds(Math.Pow(2.0, float retryAttempt))
@@ -30,6 +31,7 @@ let private retryPolicy =
 let private circuitBreakerPolicy =
     HttpPolicyExtensions
         .HandleTransientHttpError()
+        .Or<Polly.Timeout.TimeoutRejectedException>()
         .CircuitBreakerAsync(
             handledEventsAllowedBeforeBreaking = 5,
             durationOfBreak = TimeSpan.FromSeconds(30.0)
@@ -37,7 +39,7 @@ let private circuitBreakerPolicy =
 
 // Timeout policy
 let private timeoutPolicy =
-    Policy.TimeoutAsync<HttpResponseMessage>(TimeSpan.FromSeconds(30.0))
+    Policy.TimeoutAsync<HttpResponseMessage>(TimeSpan.FromSeconds(120.0))
 
 // Combined policy
 let private combinedPolicy =
@@ -52,6 +54,8 @@ let initializeHttpClientFactory () =
 
     services
         .AddHttpClient("telebot")
+        .AddPolicyHandler(combinedPolicy)
+        .ConfigureHttpClient(Action<HttpClient>(fun client -> client.Timeout <- TimeSpan.FromSeconds(30.0)))
         .ConfigurePrimaryHttpMessageHandler(
             Func<HttpMessageHandler>(fun () -> 
                 let handler = new HttpClientHandler(CookieContainer = System.Net.CookieContainer())

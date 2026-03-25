@@ -1,4 +1,4 @@
-﻿module Telebot.VideoDownloader
+module Telebot.VideoDownloader
 
 open System
 open System.Diagnostics
@@ -40,6 +40,61 @@ let downloadFileAsync (url: string) (filePath: string) : Async<unit> =
                 raise ex
         }
     )
+let ensureVideoHasAudioAsync (filePath: string) : Async<unit> =
+    withOperationTelemetry "ensure_video_audio" (fun scope ->
+        async {
+            try
+                TelemetryScope.addProperty "file_path" filePath scope |> ignore
+                let probeArgs = sprintf "-v error -show_entries stream=codec_type -of default=nw=1:nk=1 \"%s\"" filePath
+                let probeInfo = 
+                    ProcessStartInfo(
+                        FileName = "ffprobe", 
+                        Arguments = probeArgs, 
+                        UseShellExecute = false, 
+                        RedirectStandardOutput = true, 
+                        CreateNoWindow = true
+                    )
+                use probeProcess = new Process(StartInfo = probeInfo)
+                let! probeResult = Task.Run(fun () -> probeProcess.Start()) |> Async.AwaitTask
+                
+                if probeResult then
+                    let! probeOutput = probeProcess.StandardOutput.ReadToEndAsync() |> Async.AwaitTask
+                    do! Task.Run(fun () -> probeProcess.WaitForExit()) |> Async.AwaitTask
+
+                    if not (probeOutput.Contains("audio")) then
+                        TelemetryScope.logInfo "No audio stream found, adding silent audio track" scope
+                        let tempFilePath = $"{filePath}.temp.mp4"
+                        let ffmpegArgs = sprintf "-y -v error -i \"%s\" -f lavfi -i anullsrc=channel_layout=stereo:sample_rate=44100 -c:v copy -c:a aac -shortest \"%s\"" filePath tempFilePath
+                        let ffmpegInfo =
+                            ProcessStartInfo(
+                                FileName = "ffmpeg",
+                                Arguments = ffmpegArgs,
+                                UseShellExecute = false,
+                                RedirectStandardError = true,
+                                RedirectStandardOutput = true,
+                                CreateNoWindow = true
+                            )
+                        use ffmpegProcess = new Process(StartInfo = ffmpegInfo)
+                        let! startResult = Task.Run(fun () -> ffmpegProcess.Start()) |> Async.AwaitTask
+                        
+                        if startResult then
+                            do! Task.Run(fun () -> ffmpegProcess.WaitForExit()) |> Async.AwaitTask
+                            if ffmpegProcess.ExitCode = 0 then
+                                File.Move(tempFilePath, filePath, true)
+                                TelemetryScope.logInfo "Silent audio track added successfully" scope
+                            else
+                                let! error = ffmpegProcess.StandardError.ReadToEndAsync() |> Async.AwaitTask
+                                TelemetryScope.logError None $"Failed to add silent audio. ffmpeg error: {error}" scope
+                                if File.Exists tempFilePath then File.Delete tempFilePath
+                        else
+                            TelemetryScope.logError None "Failed to start ffmpeg process for audio track addition" scope
+                else
+                    TelemetryScope.logError None "Failed to start ffprobe process" scope
+            with
+            | ex ->
+                TelemetryScope.logError (Some ex) "Error ensuring video has audio" scope
+        }
+    )
 
 // Download media with better async handling
 let downloadMediaAsync (url: string) (isVideo: bool) : Async<GalleryDisplay> =
@@ -55,6 +110,9 @@ let downloadMediaAsync (url: string) (isVideo: bool) : Async<GalleryDisplay> =
             TelemetryScope.logInfo (sprintf "Downloading %s media" mediaType) scope
 
             do! downloadFileAsync url fileName
+
+            if isVideo then
+                do! ensureVideoHasAudioAsync fileName
 
             return if isVideo then Video fileName else Photo fileName
         }

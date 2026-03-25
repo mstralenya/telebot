@@ -1,5 +1,6 @@
-﻿module Telebot.TikTok
+module Telebot.TikTok
 
+open System
 open System.Net
 open System.Text.RegularExpressions
 open Newtonsoft.Json.Linq
@@ -50,8 +51,7 @@ module private TikTok =
             | Some jObject ->
                 let audioUrl = getJsonToken jObject "data.music"
 
-                let fileName =
-                    getJsonToken jObject "data.music_info.title" |> fun title -> $"tt_{title}.mp3"
+                let fileName = $"tt_{Guid.NewGuid()}.mp3"
 
                 do! downloadFileAsync audioUrl fileName
 
@@ -67,8 +67,7 @@ module private TikTok =
             | Some jObject ->
                 let videoUrl = getJsonToken jObject "data.play"
 
-                let fileName =
-                    getJsonToken jObject "data.id" |> fun title -> $"tt_{title}.mp4"
+                let fileName = $"tt_{Guid.NewGuid()}.mp4"
 
                 do! downloadFileAsync videoUrl fileName
 
