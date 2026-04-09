@@ -132,9 +132,16 @@ let downloadMediaWithAudioAsync (url: string) (audioUrl: string option) (isVideo
                 let audioFile = $"{name}_a.mp4"
                 let finalFile = $"{name}.mp4"
 
+                TelemetryScope.addProperty "video_url" url scope |> ignore
+                TelemetryScope.addProperty "audio_url" aUrl scope |> ignore
+                TelemetryScope.addProperty "video_file" videoFile scope |> ignore
+                TelemetryScope.addProperty "audio_file" audioFile scope |> ignore
+                TelemetryScope.addProperty "final_file" finalFile scope |> ignore
                 TelemetryScope.logInfo "Downloading DASH video and audio separately" scope
 
                 let! _ = Async.Parallel [ downloadFileAsync url videoFile; downloadFileAsync aUrl audioFile ]
+
+                TelemetryScope.logInfo "Files downloaded, initiating ffmpeg merge" scope
 
                 let ffmpegArgs = sprintf "-y -v error -i \"%s\" -i \"%s\" -c:v copy -c:a aac \"%s\"" videoFile audioFile finalFile
                 let ffmpegInfo =
@@ -158,6 +165,8 @@ let downloadMediaWithAudioAsync (url: string) (audioUrl: string option) (isVideo
                         do! ensureVideoHasAudioAsync finalFile
                     else
                         TelemetryScope.logInfo "Video and audio merged successfully" scope
+                else
+                    TelemetryScope.logError None "Failed to start ffmpeg process for DASH merge" scope
                 
                 if File.Exists videoFile then File.Delete videoFile
                 if File.Exists audioFile then File.Delete audioFile

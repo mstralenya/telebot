@@ -112,6 +112,9 @@ module private Instagram =
                     |> Option.bind _.VideoDashManifest
                     |> Option.bind (fun m -> getBaseUrlFromDash m "audio")
 
+                if audioUrl.IsSome then
+                    Log.Information $"Found DASH audio stream for reel {rId}"
+
                 match xdt.VideoUrl with
                 | Some url ->
                     let! gallery = [| downloadMediaWithAudioAsync url audioUrl true |] |> Async.Parallel
@@ -139,9 +142,12 @@ module private Instagram =
                             
                             let audioUrl = 
                                 if e.Node.IsVideo then
-                                    e.Node.DashInfo
-                                    |> Option.bind _.VideoDashManifest
-                                    |> Option.bind (fun m -> getBaseUrlFromDash m "audio")
+                                    let url = 
+                                        e.Node.DashInfo
+                                        |> Option.bind _.VideoDashManifest
+                                        |> Option.bind (fun m -> getBaseUrlFromDash m "audio")
+                                    if url.IsSome then Log.Information $"Found DASH audio stream for sidecar item in post {pId}"
+                                    url
                                 else None
 
                             downloadMediaWithAudioAsync downloadUrl audioUrl e.Node.IsVideo)
@@ -151,9 +157,12 @@ module private Instagram =
                         
                         let audioUrl = 
                             if xdt.IsVideo then
-                                xdt.DashInfo
-                                |> Option.bind _.VideoDashManifest
-                                |> Option.bind (fun m -> getBaseUrlFromDash m "audio")
+                                let aUrl =
+                                    xdt.DashInfo
+                                    |> Option.bind _.VideoDashManifest
+                                    |> Option.bind (fun m -> getBaseUrlFromDash m "audio")
+                                if aUrl.IsSome then Log.Information $"Found DASH audio stream for post {pId}"
+                                aUrl
                             else None
 
                         match url with
