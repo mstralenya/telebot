@@ -262,11 +262,11 @@ type InstagramLinksHandler() =
     member private this.getInstagramLinks (message: string option) = getLinks Instagram.postRegex message
     member private this.getInstagramAudioLinks (message: string option) =
         match message with
-        | Some text when text.IndexOf("audio", System.StringComparison.OrdinalIgnoreCase) >= 0 -> getLinks Instagram.postRegex message
+        | Some text when text.IndexOf("audio", StringComparison.OrdinalIgnoreCase) >= 0 -> getLinks Instagram.postRegex message
         | _ -> List.empty
     member private this.getInstagramVideoLinks (message: string option) =
         match message with
-        | Some text when text.IndexOf("audio", System.StringComparison.OrdinalIgnoreCase) < 0 -> getLinks Instagram.postRegex message
+        | Some text when text.IndexOf("audio", StringComparison.OrdinalIgnoreCase) < 0 -> getLinks Instagram.postRegex message
         | _ -> List.empty
     member private this.extractInstagramShareLinks =
         createLinkExtractor this.getInstagramShareLinks InstagramShareMessage
