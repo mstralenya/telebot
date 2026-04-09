@@ -52,6 +52,7 @@ let ensureVideoHasAudioAsync (filePath: string) : Async<unit> =
                         Arguments = probeArgs, 
                         UseShellExecute = false, 
                         RedirectStandardOutput = true, 
+                        RedirectStandardError = true,
                         CreateNoWindow = true
                     )
                 use probeProcess = new Process(StartInfo = probeInfo)
@@ -59,9 +60,12 @@ let ensureVideoHasAudioAsync (filePath: string) : Async<unit> =
                 
                 if probeResult then
                     let! probeOutput = probeProcess.StandardOutput.ReadToEndAsync() |> Async.AwaitTask
+                    let! probeError = probeProcess.StandardError.ReadToEndAsync() |> Async.AwaitTask
                     do! Task.Run(fun () -> probeProcess.WaitForExit()) |> Async.AwaitTask
 
-                    if not (probeOutput.Contains("audio")) then
+                    if probeProcess.ExitCode <> 0 then
+                        TelemetryScope.logError None $"ffprobe failed with exit code {probeProcess.ExitCode}: {probeError}" scope
+                    elif not (probeOutput.Contains("audio")) then
                         TelemetryScope.logInfo "No audio stream found, adding silent audio track" scope
                         let tempFilePath = $"{filePath}.temp.mp4"
                         let ffmpegArgs = sprintf "-y -v error -i \"%s\" -f lavfi -i anullsrc=channel_layout=stereo:sample_rate=44100 -c:v copy -c:a aac -shortest \"%s\"" filePath tempFilePath
