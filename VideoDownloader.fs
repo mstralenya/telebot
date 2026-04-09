@@ -122,6 +122,51 @@ let downloadMediaAsync (url: string) (isVideo: bool) : Async<GalleryDisplay> =
         }
     )
 
+let downloadMediaWithAudioAsync (url: string) (audioUrl: string option) (isVideo: bool) : Async<GalleryDisplay> =
+    match audioUrl with
+    | Some aUrl when isVideo ->
+        withOperationTelemetry "media_download_dash" (fun scope ->
+            async {
+                let name = Guid.NewGuid()
+                let videoFile = $"{name}_v.mp4"
+                let audioFile = $"{name}_a.mp4"
+                let finalFile = $"{name}.mp4"
+
+                TelemetryScope.logInfo "Downloading DASH video and audio separately" scope
+
+                let! _ = Async.Parallel [ downloadFileAsync url videoFile; downloadFileAsync aUrl audioFile ]
+
+                let ffmpegArgs = sprintf "-y -v error -i \"%s\" -i \"%s\" -c:v copy -c:a aac \"%s\"" videoFile audioFile finalFile
+                let ffmpegInfo =
+                    ProcessStartInfo(
+                        FileName = "ffmpeg",
+                        Arguments = ffmpegArgs,
+                        UseShellExecute = false,
+                        RedirectStandardError = true,
+                        RedirectStandardOutput = true,
+                        CreateNoWindow = true
+                    )
+                use ffmpegProcess = new Process(StartInfo = ffmpegInfo)
+                let! startResult = Task.Run(fun () -> ffmpegProcess.Start()) |> Async.AwaitTask
+                if startResult then
+                    do! Task.Run(fun () -> ffmpegProcess.WaitForExit()) |> Async.AwaitTask
+                    if ffmpegProcess.ExitCode <> 0 then
+                        let! error = ffmpegProcess.StandardError.ReadToEndAsync() |> Async.AwaitTask
+                        TelemetryScope.logError None $"Failed to merge audio. ffmpeg error: {error}" scope
+                        // Fallback to ensuring audio on the video file if merge fails
+                        File.Move(videoFile, finalFile)
+                        do! ensureVideoHasAudioAsync finalFile
+                    else
+                        TelemetryScope.logInfo "Video and audio merged successfully" scope
+                
+                if File.Exists videoFile then File.Delete videoFile
+                if File.Exists audioFile then File.Delete audioFile
+
+                return Video finalFile
+            }
+        )
+    | _ -> downloadMediaAsync url isVideo
+
 // Backward compatibility synchronous version
 let downloadMedia url isVideo =
     downloadMediaAsync url isVideo |> Async.RunSynchronously

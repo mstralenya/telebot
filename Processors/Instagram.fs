@@ -1,4 +1,4 @@
-﻿module Telebot.Instagram
+module Telebot.Instagram
 
 open System
 open System.IO
@@ -9,6 +9,7 @@ open System.Text.Json
 open System.Text.RegularExpressions
 open System.Collections.Generic
 open System.Threading
+open System.Xml.Linq
 open Serilog
 open Telebot.DataTypes
 open Telebot.Bus
@@ -90,21 +91,33 @@ module private Instagram =
                 return "Failed to retrieve the real URL."
         }
 
+    let private getBaseUrlFromDash (manifest: string) (mimeTypePrefix: string) =
+        try
+            let doc = XDocument.Parse(manifest)
+            doc.Descendants()
+            |> Seq.tryFind (fun e -> e.Name.LocalName = "AdaptationSet" && e.Attribute(XName.Get("mimeType")) <> null && e.Attribute(XName.Get("mimeType")).Value.StartsWith(mimeTypePrefix))
+            |> Option.bind (fun e -> e.Descendants() |> Seq.tryFind (fun d -> d.Name.LocalName = "BaseURL"))
+            |> Option.map (fun e -> e.Value)
+        with
+        | _ -> None
+
     let private downloadReel rId =
         async {
             let! media = fetchMediaData rId
 
-            return!
-                media.Data
-                |> Option.bind _.InstagramXdt
-                |> Option.bind _.VideoUrl
-                |> function
-                    | Some url ->
-                        async {
-                            let! gallery = [| downloadMediaAsync url true |] |> Async.Parallel
-                            return Reply.createGallery gallery None
-                        }
-                    | None -> async { return Reply.createMessage "Failed to download reel" }
+            match media.Data |> Option.bind _.InstagramXdt with
+            | Some xdt ->
+                let audioUrl =
+                    xdt.DashInfo
+                    |> Option.bind _.VideoDashManifest
+                    |> Option.bind (fun m -> getBaseUrlFromDash m "audio")
+
+                match xdt.VideoUrl with
+                | Some url ->
+                    let! gallery = [| downloadMediaWithAudioAsync url audioUrl true |] |> Async.Parallel
+                    return Reply.createGallery gallery None
+                | None -> return Reply.createMessage "Failed to download reel"
+            | None -> return Reply.createMessage "Failed to download reel"
         }
 
     let private downloadPost pId =
@@ -123,14 +136,28 @@ module private Instagram =
                                     e.Node.VideoUrl
                                 else
                                     e.Node.DisplayUrl
+                            
+                            let audioUrl = 
+                                if e.Node.IsVideo then
+                                    e.Node.DashInfo
+                                    |> Option.bind _.VideoDashManifest
+                                    |> Option.bind (fun m -> getBaseUrlFromDash m "audio")
+                                else None
 
-                            downloadMediaAsync downloadUrl e.Node.IsVideo)
+                            downloadMediaWithAudioAsync downloadUrl audioUrl e.Node.IsVideo)
                         |> Async.Parallel
                     | _ ->
                         let url = if xdt.IsVideo then xdt.VideoUrl else xdt.ImageUrl
+                        
+                        let audioUrl = 
+                            if xdt.IsVideo then
+                                xdt.DashInfo
+                                |> Option.bind _.VideoDashManifest
+                                |> Option.bind (fun m -> getBaseUrlFromDash m "audio")
+                            else None
 
                         match url with
-                        | Some u -> [| downloadMediaAsync u xdt.IsVideo |]
+                        | Some u -> [| downloadMediaWithAudioAsync u audioUrl xdt.IsVideo |]
                         | None -> [||]
                         |> Async.Parallel
 

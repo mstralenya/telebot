@@ -1,4 +1,4 @@
-﻿module Telebot.InstagramData
+module Telebot.InstagramData
 
 open System.Text.Json.Serialization
 
@@ -27,6 +27,14 @@ type InstagramTaggedUserEdge =
     {
         [<JsonPropertyName("edges")>]
         Edges: obj list
+    }
+
+type InstagramDashInfo =
+    {
+        [<JsonPropertyName("is_dash_eligible")>]
+        IsDashEligible: bool option
+        [<JsonPropertyName("video_dash_manifest")>]
+        VideoDashManifest: string option
     }
 
 type InstagramMediaNode =
@@ -63,6 +71,10 @@ type InstagramMediaNode =
         AccessibilityCaption: string option
         [<JsonPropertyName("is_video")>]
         IsVideo: bool
+        [<JsonPropertyName("has_audio")>]
+        HasAudio: bool option
+        [<JsonPropertyName("dash_info")>]
+        DashInfo: InstagramDashInfo option
         [<JsonPropertyName("tracking_token")>]
         TrackingToken: string
         [<JsonPropertyName("upcoming_event")>]
@@ -101,6 +113,8 @@ type InstagramCaptionEdge =
         Node: InstagramCaptionNode
     }
 
+
+
 type InstagramXdt =
     {
         [<JsonPropertyName("video_url")>]
@@ -109,6 +123,10 @@ type InstagramXdt =
         ImageUrl: string option
         [<JsonPropertyName("is_video")>]
         IsVideo: bool
+        [<JsonPropertyName("has_audio")>]
+        HasAudio: bool option
+        [<JsonPropertyName("dash_info")>]
+        DashInfo: InstagramDashInfo option
         [<JsonPropertyName("edge_media_to_caption")>]
         EdgeMediaToCaption: {| Edges: InstagramCaptionEdge list |}
         [<JsonPropertyName("edge_sidecar_to_children")>]
