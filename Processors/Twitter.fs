@@ -1,4 +1,4 @@
-﻿module Telebot.Twitter
+module Telebot.Twitter
 
 open System.Net.Http
 open System.Net.Http.Json
@@ -17,6 +17,7 @@ module private Twitter =
     // Function to replace the domain in the URL
     let private replaceDomain (url: string) =
         url.Replace("https://x.com/", "https://api.vxtwitter.com/")
+           .Replace("https://twitter.com/", "https://api.vxtwitter.com/")
 
     // Main function to process the URL and return the Tweet structure
     let private getTweetFromUrlAsync (url: string) =
