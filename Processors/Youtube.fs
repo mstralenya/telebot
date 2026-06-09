@@ -1,4 +1,4 @@
-﻿module Telebot.Youtube
+module Telebot.Youtube
 
 open System
 open System.Diagnostics
@@ -91,6 +91,40 @@ module private Youtube =
     // Specific tool paths
     let private ytDlpExe = resolveToolPath "yt-dlp"
     let private ffmpegExe = resolveToolPath "ffmpeg"
+
+    // Resolve cookies path if configured or present
+    let private cookiesArg =
+        try
+            let envPath = Environment.GetEnvironmentVariable("YOUTUBE_COOKIES_PATH")
+            if not (String.IsNullOrWhiteSpace(envPath)) && File.Exists(envPath) then
+                Log.Information("Using cookies from environment variable YOUTUBE_COOKIES_PATH: {Path}", envPath)
+                $" --cookies \"{envPath}\""
+            else
+                let searchDirs =
+                    [
+                        try Some (Directory.GetCurrentDirectory()) with _ -> None
+                        try Some AppContext.BaseDirectory with _ -> None
+                        try Some (Path.Combine(AppContext.BaseDirectory, "tools")) with _ -> None
+                    ]
+                    |> List.choose id
+                let cookieFiles = [ "youtube-cookies.txt"; "cookies.txt" ]
+                let foundFile =
+                    seq {
+                        for dir in searchDirs do
+                            for file in cookieFiles do
+                                yield Path.Combine(dir, file)
+                    }
+                    |> Seq.tryFind File.Exists
+                match foundFile with
+                | Some path ->
+                    Log.Information("Using cookies file: {Path}", path)
+                    $" --cookies \"{path}\""
+                | None ->
+                    Log.Information("No cookies file found for yt-dlp")
+                    ""
+        with ex ->
+            Log.Error(ex, "Error resolving cookies for yt-dlp")
+            ""
 
     do
         Log.Information("Using yt-dlp executable: {ytDlpExe}", ytDlpExe)
@@ -306,7 +340,7 @@ module private Youtube =
             |> Option.orElse (combos |> List.tryLast)
 
     let private getJson (url: string) =
-        let args = $"-J --no-warnings --no-simulate --no-check-certificates \"{url}\""
+        let args = $"-J --no-warnings --no-simulate --no-check-certificates{cookiesArg} \"{url}\""
         let code, stdout, stderr = runProcess ytDlpExe args None
         if code <> 0 then
             Log.Warning("yt-dlp -J failed: {stderr}", stderr)
@@ -372,7 +406,7 @@ module private Youtube =
                     if String.IsNullOrWhiteSpace(dir) then "" else $" --ffmpeg-location \"{dir}\""
                 else ""
             with _ -> ""
-        let args = $"-f {vId}+{aId} --merge-output-format mp4{ffmpegLocArg} -o \"{outFile}\" \"{url}\""
+        let args = $"-f {vId}+{aId} --merge-output-format mp4{ffmpegLocArg}{cookiesArg} -o \"{outFile}\" \"{url}\""
         let code1, _o1, e1 = runProcess ytDlpExe args None
         // Helper to try manual merge if yt-dlp left separate files like out.f398.mp4 and out.f139.m4a
         let tryManualMerge () =
@@ -408,7 +442,7 @@ module private Youtube =
             else
                 Log.Warning("yt-dlp merge failed or file missing, trying recode to mp4: {err}", e1)
                 let tmpName = Path.ChangeExtension(outFile, ".temp.mp4")
-                let args2 = $"-f {vId}+{aId} --recode-video mp4{ffmpegLocArg} -o \"{tmpName}\" \"{url}\""
+                let args2 = $"-f {vId}+{aId} --recode-video mp4{ffmpegLocArg}{cookiesArg} -o \"{tmpName}\" \"{url}\""
                 let code2, _o2, e2 = runProcess ytDlpExe args2 None
                 if code2 = 0 && File.Exists tmpName then
                     try
@@ -504,7 +538,7 @@ module private Youtube =
                     let best = audios |> Array.sortByDescending (fun a -> defaultArg a.abr 0.0) |> Array.head
                     let ext = defaultArg best.ext "m4a"
                     let fileName = $"yt_{id}_{Guid.NewGuid()}.{ext}"
-                    let args = $"-f {best.format_id} -o \"{fileName}\" \"{url}\""
+                    let args = $"-f {best.format_id}{cookiesArg} -o \"{fileName}\" \"{url}\""
                     let code, _o, e = runProcess ytDlpExe args None
                     if code <> 0 || not (File.Exists fileName) then
                         Log.Error("yt-dlp audio download failed: {err}", e)
