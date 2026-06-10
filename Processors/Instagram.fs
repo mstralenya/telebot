@@ -69,8 +69,9 @@ module private Instagram =
             use request = createRequest postId
             let! response = Telebot.HttpClient.executeRequestAsync request
             let cancellationToken = CancellationToken.None
-            Log.Information $"fetched instagram data:\n {response.StatusCode} \n {response.Content.ReadAsStringAsync cancellationToken}"
-            return! response.Content.ReadFromJsonAsync<InstagramMediaResponse>() |> Async.AwaitTask
+            let! body = response.Content.ReadAsStringAsync cancellationToken |> Async.AwaitTask
+            Log.Information $"fetched instagram data:\n {response.StatusCode} \n {body}"
+            return JsonSerializer.Deserialize<InstagramMediaResponse>(body)
         }
 
     let private getCaption (xdt: InstagramXdt) =
@@ -94,10 +95,29 @@ module private Instagram =
     let private getBaseUrlFromDash (manifest: string) (mimeTypePrefix: string) =
         try
             let doc = XDocument.Parse(manifest)
-            doc.Descendants()
-            |> Seq.tryFind (fun e -> e.Name.LocalName = "AdaptationSet" && e.Attribute(XName.Get("mimeType")) <> null && e.Attribute(XName.Get("mimeType")).Value.StartsWith(mimeTypePrefix))
-            |> Option.bind (fun e -> e.Descendants() |> Seq.tryFind (fun d -> d.Name.LocalName = "BaseURL"))
-            |> Option.map (fun e -> e.Value)
+            // 1. Try to find a Representation with matching mimeType
+            let repUrl =
+                doc.Descendants()
+                |> Seq.tryFind (fun e -> 
+                    e.Name.LocalName = "Representation" && 
+                    e.Attribute(XName.Get("mimeType")) <> null && 
+                    e.Attribute(XName.Get("mimeType")).Value.StartsWith(mimeTypePrefix))
+                |> Option.bind (fun e -> e.Descendants() |> Seq.tryFind (fun d -> d.Name.LocalName = "BaseURL"))
+                |> Option.map (fun e -> e.Value)
+            
+            match repUrl with
+            | Some url -> Some url
+            | None ->
+                // 2. Fallback to finding an AdaptationSet with matching mimeType or contentType
+                doc.Descendants()
+                |> Seq.tryFind (fun e -> 
+                    e.Name.LocalName = "AdaptationSet" && (
+                        (e.Attribute(XName.Get("mimeType")) <> null && e.Attribute(XName.Get("mimeType")).Value.StartsWith(mimeTypePrefix)) ||
+                        (e.Attribute(XName.Get("contentType")) <> null && e.Attribute(XName.Get("contentType")).Value.StartsWith(mimeTypePrefix))
+                    )
+                )
+                |> Option.bind (fun e -> e.Descendants() |> Seq.tryFind (fun d -> d.Name.LocalName = "BaseURL"))
+                |> Option.map (fun e -> e.Value)
         with
         | _ -> None
 
