@@ -37,6 +37,24 @@ type InstagramDashInfo =
         VideoDashManifest: string option
     }
 
+type InstagramMusicAssetInfo =
+    {
+        [<JsonPropertyName("progressive_download_url")>]
+        ProgressiveDownloadUrl: string option
+    }
+
+type InstagramMusicInfo =
+    {
+        [<JsonPropertyName("music_asset_info")>]
+        MusicAssetInfo: InstagramMusicAssetInfo option
+    }
+
+type InstagramClipsMetadata =
+    {
+        [<JsonPropertyName("music_info")>]
+        MusicInfo: InstagramMusicInfo option
+    }
+
 type InstagramMediaNode =
     {
         [<JsonPropertyName("__typename")>]
@@ -75,6 +93,8 @@ type InstagramMediaNode =
         HasAudio: bool option
         [<JsonPropertyName("dash_info")>]
         DashInfo: InstagramDashInfo option
+        [<JsonPropertyName("clips_metadata")>]
+        ClipsMetadata: InstagramClipsMetadata option
         [<JsonPropertyName("tracking_token")>]
         TrackingToken: string
         [<JsonPropertyName("upcoming_event")>]
@@ -127,6 +147,8 @@ type InstagramXdt =
         HasAudio: bool option
         [<JsonPropertyName("dash_info")>]
         DashInfo: InstagramDashInfo option
+        [<JsonPropertyName("clips_metadata")>]
+        ClipsMetadata: InstagramClipsMetadata option
         [<JsonPropertyName("edge_media_to_caption")>]
         EdgeMediaToCaption: {| Edges: InstagramCaptionEdge list |}
         [<JsonPropertyName("edge_sidecar_to_children")>]

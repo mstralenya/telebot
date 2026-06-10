@@ -111,9 +111,14 @@ module private Instagram =
                     xdt.DashInfo
                     |> Option.bind _.VideoDashManifest
                     |> Option.bind (fun m -> getBaseUrlFromDash m "audio")
+                    |> Option.orElseWith (fun () ->
+                        xdt.ClipsMetadata
+                        |> Option.bind _.MusicInfo
+                        |> Option.bind _.MusicAssetInfo
+                        |> Option.bind _.ProgressiveDownloadUrl)
 
                 if audioUrl.IsSome then
-                    Log.Information $"Found DASH audio stream for reel {rId}"
+                    Log.Information $"Found DASH or licensed audio stream for reel {rId}"
 
                 match xdt.VideoUrl with
                 | Some url ->
@@ -146,7 +151,12 @@ module private Instagram =
                                         e.Node.DashInfo
                                         |> Option.bind _.VideoDashManifest
                                         |> Option.bind (fun m -> getBaseUrlFromDash m "audio")
-                                    if url.IsSome then Log.Information $"Found DASH audio stream for sidecar item in post {pId}"
+                                        |> Option.orElseWith (fun () ->
+                                            e.Node.ClipsMetadata
+                                            |> Option.bind _.MusicInfo
+                                            |> Option.bind _.MusicAssetInfo
+                                            |> Option.bind _.ProgressiveDownloadUrl)
+                                    if url.IsSome then Log.Information $"Found DASH or licensed audio stream for sidecar item in post {pId}"
                                     url
                                 else None
 
@@ -161,7 +171,12 @@ module private Instagram =
                                     xdt.DashInfo
                                     |> Option.bind _.VideoDashManifest
                                     |> Option.bind (fun m -> getBaseUrlFromDash m "audio")
-                                if aUrl.IsSome then Log.Information $"Found DASH audio stream for post {pId}"
+                                    |> Option.orElseWith (fun () ->
+                                        xdt.ClipsMetadata
+                                        |> Option.bind _.MusicInfo
+                                        |> Option.bind _.MusicAssetInfo
+                                        |> Option.bind _.ProgressiveDownloadUrl)
+                                if aUrl.IsSome then Log.Information $"Found DASH or licensed audio stream for post {pId}"
                                 aUrl
                             else None
 
