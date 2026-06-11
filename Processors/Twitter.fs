@@ -23,7 +23,8 @@ module private Twitter =
     let private getTweetFromUrlAsync (url: string) =
         async {
             let newUrl = replaceDomain url
-            let! response = HttpClient.getAsync newUrl
+            let useProxy = Telebot.HttpClient.ProxyConfig.useProxyForTwitter()
+            let! response = HttpClient.getAsync newUrl useProxy
             let options = JsonSerializerOptions()
             options.PropertyNameCaseInsensitive <- true
             match response.StatusCode with
@@ -38,9 +39,10 @@ module private Twitter =
     // Function to process a list of URLs and return an array of results
     let private processUrlsAsync (urls: TwitterMediaExtended list) =
         async {
+            let useProxy = Telebot.HttpClient.ProxyConfig.useProxyForTwitter()
             let! results =
                 urls
-                |> List.map (fun media -> downloadMediaAsync media.url (media.mediaType = TwitterMedia.Video))
+                |> List.map (fun media -> downloadMediaAsync media.url (media.mediaType = TwitterMedia.Video) useProxy)
                 |> Async.Parallel
             return results |> Array.toList
         }

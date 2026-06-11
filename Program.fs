@@ -1,4 +1,4 @@
-﻿module Program
+module Program
 
 open System
 open System.IO
@@ -161,15 +161,13 @@ let healthEndpoint =
     path "/health" >=> Writers.setMimeType "application/json" >=> healthCheckAsync
 
 // Start web server asynchronously
-let startWebServerAsync (port: int) : Async<unit> =
+let startWebServerAsync (port: int) (app: WebPart) : Async<unit> =
     async {
         let config = {
             defaultConfig with
                 bindings = [ HttpBinding.createSimple HTTP "0.0.0.0" port ]
                 cancellationToken = cancellationTokenSource.Token
         }
-
-        let app = choose [ prometheusEndpoint; healthEndpoint ]
 
         Log.Information($"Starting web server on port {port}")
 
@@ -282,15 +280,22 @@ let mainAsync () : Async<int> =
                         do! host.StartAsync(cancellationTokenSource.Token) |> Async.AwaitTask
                         TelemetryScope.logInfo "Background services started" scope
 
-                        // Start the metrics/health web server
+                        // Start the metrics and health web servers on separate ports
                         let metricsPort =
                             Environment.GetEnvironmentVariable "METRICS_PORT"
                             |> Option.ofObj
                             |> Option.map int
                             |> Option.defaultValue 3001
 
-                        do! startWebServerAsync metricsPort
-                        TelemetryScope.logInfo $"Metrics server started on port {metricsPort}" scope
+                        let healthPort =
+                            Environment.GetEnvironmentVariable "HEALTH_PORT"
+                            |> Option.ofObj
+                            |> Option.map int
+                            |> Option.defaultValue 3002
+
+                        do! startWebServerAsync metricsPort prometheusEndpoint
+                        do! startWebServerAsync healthPort healthEndpoint
+                        TelemetryScope.logInfo $"Metrics server started on port {metricsPort}, Health server started on port {healthPort}" scope
 
                         // Configure and start the Telegram bot
                         let config =

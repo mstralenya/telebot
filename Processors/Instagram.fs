@@ -64,10 +64,10 @@ module private Instagram =
         Log.Information $"created instagram request {JsonSerializer.Serialize request}"
         request
 
-    let private fetchMediaData postId =
+    let private fetchMediaData postId useProxy =
         async {
             use request = createRequest postId
-            let! response = Telebot.HttpClient.executeRequestAsync request
+            let! response = Telebot.HttpClient.executeRequestAsync request useProxy
             let cancellationToken = CancellationToken.None
             let! body = response.Content.ReadAsStringAsync cancellationToken |> Async.AwaitTask
             Log.Information $"fetched instagram data:\n {response.StatusCode} \n {body}"
@@ -81,9 +81,9 @@ module private Instagram =
         |> Option.defaultValue ""
 
 
-    let private getRealInstagramUrl (shareUrl: string) =
+    let private getRealInstagramUrl (shareUrl: string) useProxy =
         async {
-            let! response = Telebot.HttpClient.getAsync shareUrl
+            let! response = Telebot.HttpClient.getAsync shareUrl useProxy
 
             if response.IsSuccessStatusCode then
                 let realUrl = response.RequestMessage.RequestUri.ToString()
@@ -123,7 +123,8 @@ module private Instagram =
 
     let private downloadReel rId =
         async {
-            let! media = fetchMediaData rId
+            let useProxy = Telebot.HttpClient.ProxyConfig.useProxyForInstagramReels()
+            let! media = fetchMediaData rId useProxy
 
             match media.Data |> Option.bind _.InstagramXdt with
             | Some xdt ->
@@ -142,7 +143,7 @@ module private Instagram =
 
                 match xdt.VideoUrl with
                 | Some url ->
-                    let! gallery = [| downloadMediaWithAudioAsync url audioUrl true |] |> Async.Parallel
+                    let! gallery = [| downloadMediaWithAudioAsync url audioUrl true useProxy |] |> Async.Parallel
                     return Reply.createGallery gallery None
                 | None -> return Reply.createMessage "Failed to download reel"
             | None -> return Reply.createMessage "Failed to download reel"
@@ -150,7 +151,8 @@ module private Instagram =
 
     let private downloadPost pId =
         async {
-            let! media = fetchMediaData pId
+            let useProxy = Telebot.HttpClient.ProxyConfig.useProxyForInstagramPosts()
+            let! media = fetchMediaData pId useProxy
 
             match media.Data |> Option.bind (fun d -> d.InstagramXdt) with
             | Some xdt ->
@@ -180,7 +182,7 @@ module private Instagram =
                                     url
                                 else None
 
-                            downloadMediaWithAudioAsync downloadUrl audioUrl e.Node.IsVideo)
+                            downloadMediaWithAudioAsync downloadUrl audioUrl e.Node.IsVideo useProxy)
                         |> Async.Parallel
                     | _ ->
                         let url = if xdt.IsVideo then xdt.VideoUrl else xdt.ImageUrl
@@ -201,7 +203,7 @@ module private Instagram =
                             else None
 
                         match url with
-                        | Some u -> [| downloadMediaWithAudioAsync u audioUrl xdt.IsVideo |]
+                        | Some u -> [| downloadMediaWithAudioAsync u audioUrl xdt.IsVideo useProxy |]
                         | None -> [||]
                         |> Async.Parallel
 
@@ -244,9 +246,12 @@ module private Instagram =
     let getInstagramReplySync url =
         getInstagramReply url |> Async.RunSynchronously
 
-    let getInstagramShareReplyAsync url =
+    let getInstagramShareReplyAsync (url: string) =
         async {
-            let! realUrl = getRealInstagramUrl url
+            let useProxy =
+                if url.Contains("/reel") then Telebot.HttpClient.ProxyConfig.useProxyForInstagramReels()
+                else Telebot.HttpClient.ProxyConfig.useProxyForInstagramPosts()
+            let! realUrl = getRealInstagramUrl url useProxy
             return! getInstagramReply realUrl
         }
 
@@ -257,13 +262,13 @@ module private Instagram =
         getInstagramShareReply url
 
     // Audio extraction: download video then extract audio via ffmpeg
-    let private extractAudioFromVideoAsync (videoUrl: string) (id: string option) =
+    let private extractAudioFromVideoAsync (videoUrl: string) (id: string option) useProxy =
         async {
             try
                 let name = Guid.NewGuid().ToString("N")
                 let defaultId = defaultArg id "noid"
                 let outVideo = $"ig_{defaultId}_{name}.mp4"
-                do! downloadFileAsync videoUrl outVideo
+                do! downloadFileAsync videoUrl outVideo useProxy
                 let outAudio = Path.ChangeExtension(outVideo, ".mp3")
 
                 let psi = ProcessStartInfo()
@@ -298,22 +303,24 @@ module private Instagram =
             try
                 match url with
                 | PostType(Reel id) ->
-                    let! media = fetchMediaData id
+                    let useProxy = Telebot.HttpClient.ProxyConfig.useProxyForInstagramReels()
+                    let! media = fetchMediaData id useProxy
                     match media.Data |> Option.bind _.InstagramXdt |> Option.bind _.VideoUrl with
                     | Some vurl ->
-                        let! res = extractAudioFromVideoAsync vurl (Some id)
+                        let! res = extractAudioFromVideoAsync vurl (Some id) useProxy
                         match res with
                         | Choice1Of2 audioPath -> return Some (Reply.createAudioFile audioPath)
                         | Choice2Of2 msg -> return Some (Reply.createMessage msg)
                     | None -> return Some (Reply.createMessage "Failed to find video for reel")
                 | PostType(Post id) ->
-                    let! media = fetchMediaData id
+                    let useProxy = Telebot.HttpClient.ProxyConfig.useProxyForInstagramPosts()
+                    let! media = fetchMediaData id useProxy
                     match media.Data |> Option.bind (fun d -> d.InstagramXdt) with
                     | Some xdt ->
                         let videoUrl = if xdt.IsVideo then xdt.VideoUrl else None
                         match videoUrl with
                         | Some vurl ->
-                            let! res = extractAudioFromVideoAsync vurl (Some id)
+                            let! res = extractAudioFromVideoAsync vurl (Some id) useProxy
                             match res with
                             | Choice1Of2 audioPath -> return Some (Reply.createAudioFile audioPath)
                             | Choice2Of2 msg -> return Some (Reply.createMessage msg)

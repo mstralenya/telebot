@@ -126,6 +126,13 @@ module private Youtube =
             Log.Error(ex, "Error resolving cookies for yt-dlp")
             ""
 
+    let private proxyArg () =
+        if Telebot.HttpClient.ProxyConfig.useProxyForYoutube() then
+            match Telebot.HttpClient.ProxyConfig.getProxyUrl() with
+            | Some url -> $" --proxy \"{url}\""
+            | None -> ""
+        else ""
+
     do
         Log.Information("Using yt-dlp executable: {ytDlpExe}", ytDlpExe)
         Log.Information("Using ffmpeg executable: {ffmpegExe}", ffmpegExe)
@@ -340,7 +347,7 @@ module private Youtube =
             |> Option.orElse (combos |> List.tryLast)
 
     let private getJson (url: string) =
-        let args = $"-J --no-warnings --no-simulate --no-check-certificates{cookiesArg} \"{url}\""
+        let args = $"-J --no-warnings --no-simulate --no-check-certificates{cookiesArg}{proxyArg()} \"{url}\""
         let code, stdout, stderr = runProcess ytDlpExe args None
         if code <> 0 then
             Log.Warning("yt-dlp -J failed: {stderr}", stderr)
@@ -406,7 +413,7 @@ module private Youtube =
                     if String.IsNullOrWhiteSpace(dir) then "" else $" --ffmpeg-location \"{dir}\""
                 else ""
             with _ -> ""
-        let args = $"-f {vId}+{aId} --merge-output-format mp4{ffmpegLocArg}{cookiesArg} -o \"{outFile}\" \"{url}\""
+        let args = $"-f {vId}+{aId} --merge-output-format mp4{ffmpegLocArg}{cookiesArg}{proxyArg()} -o \"{outFile}\" \"{url}\""
         let code1, _o1, e1 = runProcess ytDlpExe args None
         // Helper to try manual merge if yt-dlp left separate files like out.f398.mp4 and out.f139.m4a
         let tryManualMerge () =
@@ -442,7 +449,7 @@ module private Youtube =
             else
                 Log.Warning("yt-dlp merge failed or file missing, trying recode to mp4: {err}", e1)
                 let tmpName = Path.ChangeExtension(outFile, ".temp.mp4")
-                let args2 = $"-f {vId}+{aId} --recode-video mp4{ffmpegLocArg}{cookiesArg} -o \"{tmpName}\" \"{url}\""
+                let args2 = $"-f {vId}+{aId} --recode-video mp4{ffmpegLocArg}{cookiesArg}{proxyArg()} -o \"{tmpName}\" \"{url}\""
                 let code2, _o2, e2 = runProcess ytDlpExe args2 None
                 if code2 = 0 && File.Exists tmpName then
                     try
@@ -538,7 +545,7 @@ module private Youtube =
                     let best = audios |> Array.sortByDescending (fun a -> defaultArg a.abr 0.0) |> Array.head
                     let ext = defaultArg best.ext "m4a"
                     let fileName = $"yt_{id}_{Guid.NewGuid()}.{ext}"
-                    let args = $"-f {best.format_id}{cookiesArg} -o \"{fileName}\" \"{url}\""
+                    let args = $"-f {best.format_id}{cookiesArg}{proxyArg()} -o \"{fileName}\" \"{url}\""
                     let code, _o, e = runProcess ytDlpExe args None
                     if code <> 0 || not (File.Exists fileName) then
                         Log.Error("yt-dlp audio download failed: {err}", e)

@@ -9,15 +9,16 @@ open Telebot.DataTypes
 open Telebot.TelemetryService
 
 // Async file download with telemetry and resource management
-let downloadFileAsync (url: string) (filePath: string) : Async<unit> =
+let downloadFileAsync (url: string) (filePath: string) (useProxy: bool) : Async<unit> =
     withOperationTelemetry "file_download" (fun scope ->
         async {
             try
                 TelemetryScope.addProperty "url" url scope |> ignore
                 TelemetryScope.addProperty "file_path" filePath scope |> ignore
-                TelemetryScope.logInfo $"Starting download from {url} to {filePath}" scope
+                TelemetryScope.addProperty "use_proxy" useProxy scope |> ignore
+                TelemetryScope.logInfo $"Starting download from {url} to {filePath} (useProxy={useProxy})" scope
 
-                let! response = HttpClient.getAsync url
+                let! response = HttpClient.getAsync url useProxy
                 response.EnsureSuccessStatusCode() |> ignore
 
                 let! content = response.Content.ReadAsByteArrayAsync() |> Async.AwaitTask
@@ -101,7 +102,7 @@ let ensureVideoHasAudioAsync (filePath: string) : Async<unit> =
     )
 
 // Download media with better async handling
-let downloadMediaAsync (url: string) (isVideo: bool) : Async<GalleryDisplay> =
+let downloadMediaAsync (url: string) (isVideo: bool) (useProxy: bool) : Async<GalleryDisplay> =
     withOperationTelemetry "media_download" (fun scope ->
         async {
             let name = Guid.NewGuid()
@@ -113,7 +114,7 @@ let downloadMediaAsync (url: string) (isVideo: bool) : Async<GalleryDisplay> =
             let mediaType = if isVideo then "video" else "image"
             TelemetryScope.logInfo (sprintf "Downloading %s media" mediaType) scope
 
-            do! downloadFileAsync url fileName
+            do! downloadFileAsync url fileName useProxy
 
             if isVideo then
                 do! ensureVideoHasAudioAsync fileName
@@ -122,7 +123,7 @@ let downloadMediaAsync (url: string) (isVideo: bool) : Async<GalleryDisplay> =
         }
     )
 
-let downloadMediaWithAudioAsync (url: string) (audioUrl: string option) (isVideo: bool) : Async<GalleryDisplay> =
+let downloadMediaWithAudioAsync (url: string) (audioUrl: string option) (isVideo: bool) (useProxy: bool) : Async<GalleryDisplay> =
     match audioUrl with
     | Some aUrl when isVideo ->
         withOperationTelemetry "media_download_dash" (fun scope ->
@@ -139,7 +140,7 @@ let downloadMediaWithAudioAsync (url: string) (audioUrl: string option) (isVideo
                 TelemetryScope.addProperty "final_file" finalFile scope |> ignore
                 TelemetryScope.logInfo "Downloading DASH video and audio separately" scope
 
-                let! _ = Async.Parallel [ downloadFileAsync url videoFile; downloadFileAsync aUrl audioFile ]
+                let! _ = Async.Parallel [ downloadFileAsync url videoFile useProxy; downloadFileAsync aUrl audioFile useProxy ]
 
                 TelemetryScope.logInfo "Files downloaded, initiating ffmpeg merge" scope
 
@@ -174,11 +175,11 @@ let downloadMediaWithAudioAsync (url: string) (audioUrl: string option) (isVideo
                 return Video finalFile
             }
         )
-    | _ -> downloadMediaAsync url isVideo
+    | _ -> downloadMediaAsync url isVideo useProxy
 
 // Backward compatibility synchronous version
-let downloadMedia url isVideo =
-    downloadMediaAsync url isVideo |> Async.RunSynchronously
+let downloadMedia url isVideo useProxy =
+    downloadMediaAsync url isVideo useProxy |> Async.RunSynchronously
 
 // Async file deletion with telemetry
 let deleteFileAsync (filePath: string) : Async<unit> =

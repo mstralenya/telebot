@@ -21,7 +21,8 @@ module private TikTok =
 
     let private fetchTikTokUrl url =
         async {
-            let! response = HttpClient.getAsync $"https://www.tikwm.com/api/?url={url}?hd=1"
+            let useProxy = Telebot.HttpClient.ProxyConfig.useProxyForTikTok()
+            let! response = HttpClient.getAsync $"https://www.tikwm.com/api/?url={url}?hd=1" useProxy
 
             match response.StatusCode with
             | HttpStatusCode.OK ->
@@ -53,7 +54,8 @@ module private TikTok =
 
                 let fileName = $"tt_{Guid.NewGuid()}.mp3"
 
-                do! downloadFileAsync audioUrl fileName
+                let useProxy = Telebot.HttpClient.ProxyConfig.useProxyForTikTok()
+                do! downloadFileAsync audioUrl fileName useProxy
 
                 return Some(createAudioFile fileName)
             | None -> return Some(createMessage "Failed to download tiktok audio")
@@ -69,7 +71,8 @@ module private TikTok =
 
                 let fileName = $"tt_{Guid.NewGuid()}.mp4"
 
-                do! downloadFileAsync videoUrl fileName
+                let useProxy = Telebot.HttpClient.ProxyConfig.useProxyForTikTok()
+                do! downloadFileAsync videoUrl fileName useProxy
 
                 return Some(createVideoFile fileName)
             | None -> return Some(createMessage "Failed to download tiktok video")
