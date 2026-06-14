@@ -36,21 +36,20 @@ module private Twitter =
     let private twitterRegex =
         Regex(@"https://(x|twitter).com/.*/status/(\d+)", RegexOptions.Compiled)
 
-    // Function to process a list of URLs and return an array of results
-    let private processUrlsAsync (urls: TwitterMediaExtended list) =
-        async {
-            let useProxy = Telebot.HttpClient.ProxyConfig.useProxyForTwitter()
-            let! results =
-                urls
-                |> List.map (fun media -> downloadMediaAsync media.url (media.mediaType = TwitterMedia.Video) useProxy)
-                |> Async.Parallel
-            return results |> Array.toList
-        }
-
-    let private mergeMediaUrls (tweet: Tweet) =
-        match tweet.qrt with
-        | Some qrt -> tweet.media_extended @ qrt.media_extended // Concatenate the two lists if qrt is Some
-        | None -> tweet.media_extended // If qrt is None, just return the main tweet's mediaURLs
+    let private formatMedia (mediaList: TwitterMediaExtended list) =
+        if List.isEmpty mediaList then
+            ""
+        else
+            let sb = System.Text.StringBuilder()
+            sb.Append("<tg-collage>") |> ignore
+            for media in mediaList do
+                match media.mediaType with
+                | TwitterMedia.Video ->
+                    sb.AppendFormat("<video src=\"{0}\"/>", media.url) |> ignore
+                | _ ->
+                    sb.AppendFormat("<img src=\"{0}\"/>", media.url) |> ignore
+            sb.Append("</tg-collage>") |> ignore
+            sb.ToString()
 
     let getTwitterReplyAsync (url: string) =
         async {
@@ -58,27 +57,26 @@ module private Twitter =
             match tweet with
             | None -> return None
             | Some tweet ->
-                let replyText =
-                    match tweet.user_screen_name, tweet.user_name, tweet.text, tweet.qrt with
-                    | ah,
-                      a,
-                      Some t,
-                      Some {
-                               user_name = qa
-                               user_screen_name = qah
-                               text = Some qtxt
-                           } ->
-                        Some
-                            $"""<b>{a}</b> <i>(@​{ah})</i>:<blockquote>{t}</blockquote>Quoting <b>{qa}</b><i>(@​{qah})</i>:<blockquote>{qtxt}</blockquote>"""
-                    | ah, a, Some t, _ -> Some $"<b>{a}</b> <i>(@​{ah})</i>: <blockquote>{t}</blockquote>"
-                    | ah, a, _, _ -> Some $"<b>{a}</b> <i>(@​{ah})</i>:"
+                let mainText =
+                    match tweet.user_screen_name, tweet.user_name, tweet.text with
+                    | ah, a, Some t -> $"<b>{a}</b> <i>(@​{ah})</i>: <blockquote>{t}</blockquote>"
+                    | ah, a, _ -> $"<b>{a}</b> <i>(@​{ah})</i>:"
 
-                let mediaUrls = mergeMediaUrls tweet
-                let! gallery = processUrlsAsync mediaUrls
+                let mainMedia = formatMedia tweet.media_extended
 
-                match gallery.Length with
-                | i when i > 0 -> return Some(Reply.createGallery (List.toArray gallery) replyText)
-                | _ -> return Some(Reply.createMessage replyText.Value)
+                let quotedContent =
+                    match tweet.qrt with
+                    | Some qrt ->
+                        let qrtText =
+                            match qrt.user_screen_name, qrt.user_name, qrt.text with
+                            | qah, qa, Some qtxt -> $"Quoting <b>{qa}</b> <i>(@​{qah})</i>: <blockquote>{qtxt}</blockquote>"
+                            | qah, qa, _ -> $"Quoting <b>{qa}</b> <i>(@​{qah})</i>:"
+                        let qrtMedia = formatMedia qrt.media_extended
+                        qrtText + qrtMedia
+                    | None -> ""
+
+                let html = mainText + mainMedia + quotedContent
+                return Some (Reply.createRichMessage html)
         }
 
     let getTwitterReply (url: string) =

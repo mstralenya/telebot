@@ -1,4 +1,4 @@
-﻿module Telebot.Text
+module Telebot.Text
 
 open System.Text.RegularExpressions
 open System.IO
@@ -27,6 +27,10 @@ module Reply =
 
     /// Creates a Message reply.
     let createMessage text = Message text
+
+    let createReplies replies = Replies replies
+
+    let createRichMessage html = RichMessage html
 
 let getLinks (regex: Regex) (text: string option) =
     text
@@ -173,8 +177,8 @@ let private sendMediaGallery
 
     media |> Seq.map string |> Seq.iter deleteFile
 
-let reply (reply: Reply, messageId: MessageId, chatId: ChatId, ctx: UpdateContext) =
-    match reply with
+let rec reply (replyObj: Reply, messageId: MessageId, chatId: ChatId, ctx: UpdateContext) =
+    match replyObj with
     | VideoFile videoFile ->
         let fileInfo = FileInfo videoFile.File
 
@@ -204,6 +208,25 @@ let reply (reply: Reply, messageId: MessageId, chatId: ChatId, ctx: UpdateContex
                 message,
                 replyParameters = ReplyParameters.Create(messageId.MessageId, chatId),
                 parseMode = ParseMode.HTML
+            )
+
+        sendRequestAsync req ctx |> Async.Start
+
+    | Replies replies ->
+        replies |> List.iter (fun r -> reply (r, messageId, chatId, ctx))
+
+    | RichMessage html ->
+        let richMsg : InputRichMessage = {
+            Html = Some html
+            Markdown = None
+            IsRtl = None
+            SkipEntityDetection = None
+        }
+        let req =
+            Req.SendRichMessage.Make(
+                chatId,
+                richMsg,
+                replyParameters = ReplyParameters.Create(messageId.MessageId, chatId)
             )
 
         sendRequestAsync req ctx |> Async.Start

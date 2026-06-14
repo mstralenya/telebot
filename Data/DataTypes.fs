@@ -23,6 +23,8 @@ type Reply =
     | Gallery of Gallery
     | Message of string
     | AudioFile of string
+    | Replies of Reply list
+    | RichMessage of string
 
 type DownloadResult =
     | Success of Reply
