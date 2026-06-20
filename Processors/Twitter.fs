@@ -1,8 +1,10 @@
 module Telebot.Twitter
 
+open System.Linq
 open System.Net.Http.Json
 open System.Text.Json
 open System.Text.RegularExpressions
+open Serilog
 open Telebot.Bus
 open Telebot.Handlers
 open Telebot.Messages
@@ -37,6 +39,12 @@ module private Twitter =
     let private getTweetFromUrlAsync (url: string) =
         async {
             let newUrl = replaceDomain url
+            let envLang = System.Environment.GetEnvironmentVariable("TWITTER_TRANSLATION_LANG")
+            if not (System.String.IsNullOrWhiteSpace(envLang)) then
+                Log.Information("Fetching Twitter URL {Url} with translation to {Lang}", url, envLang.Trim())
+            else
+                Log.Information("Fetching Twitter URL {Url} without translation", url)
+
             let useProxy = Telebot.HttpClient.ProxyConfig.useProxyForTwitter()
             let! response = HttpClient.getAsync newUrl useProxy
             let options = JsonSerializerOptions()
@@ -47,8 +55,11 @@ module private Twitter =
                 if result.code = 200 then
                     return Some (FxConverter.toTweet result.tweet)
                 else
+                    Log.Warning("FxTwitter API returned non-200 code {Code}: {Message}", result.code, result.message)
                     return None
-            | _ -> return None
+            | _ ->
+                Log.Warning("FxTwitter API request failed with status code {StatusCode}", response.StatusCode)
+                return None
         }
 
     let private twitterRegex =
@@ -80,6 +91,7 @@ module private Twitter =
                     match tweet.translation with
                     | Some tl when not (System.String.IsNullOrWhiteSpace(tl.text)) ->
                         let direction = $"{tl.source_language.ToUpper()}→{tl.destination_language.ToUpper()}"
+                        Log.Information("Successfully retrieved translation for tweet {TweetId} ({Direction})", tweet.tweetID, direction)
                         Some $"<i>【TL {direction}】</i>\n{tl.text}"
                     | _ -> tweet.text
 
@@ -89,6 +101,7 @@ module private Twitter =
                         match qrt.translation with
                         | Some tl when not (System.String.IsNullOrWhiteSpace(tl.text)) ->
                             let direction = $"{tl.source_language.ToUpper()}→{tl.destination_language.ToUpper()}"
+                            Log.Information("Successfully retrieved translation for quoted tweet {TweetId} ({Direction})", qrt.tweetID, direction)
                             Some $"<i>【TL {direction}】</i>\n{tl.text}"
                         | _ -> qrt.text
                     | None -> None
