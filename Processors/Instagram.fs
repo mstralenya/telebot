@@ -4,7 +4,6 @@ open System
 open System.IO
 open System.Diagnostics
 open System.Net.Http
-open System.Net.Http.Json
 open System.Text.Json
 open System.Text.RegularExpressions
 open System.Collections.Generic

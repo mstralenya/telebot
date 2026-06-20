@@ -1,23 +1,37 @@
 module Telebot.Twitter
 
-open System.Net.Http
 open System.Net.Http.Json
 open System.Text.Json
 open System.Text.RegularExpressions
-open System.Threading
 open Telebot.Bus
 open Telebot.Handlers
-open Telebot.LoggingHandler
 open Telebot.Messages
 open Telebot.Text
 open Telebot.TwitterData
 open Telebot.VideoDownloader
 
 module private Twitter =
-    // Function to replace the domain in the URL
+    // Function to replace the domain in the URL and append translation language suffix if configured
     let private replaceDomain (url: string) =
-        url.Replace("https://x.com/", "https://api.vxtwitter.com/")
-           .Replace("https://twitter.com/", "https://api.vxtwitter.com/")
+        let envLang = System.Environment.GetEnvironmentVariable("TWITTER_TRANSLATION_LANG")
+        let envApiBase = System.Environment.GetEnvironmentVariable("TWITTER_API_BASE")
+        let vxString =
+            if System.String.IsNullOrWhiteSpace(envApiBase) then
+                "https://api.fxtwitter.com/"
+            else
+                let trimmed = envApiBase.Trim()
+                if trimmed.EndsWith("/") then trimmed else trimmed + "/"
+
+        let replaced =
+            url.Replace("https://x.com/", vxString)
+               .Replace("https://twitter.com/", vxString)
+        
+        if System.String.IsNullOrWhiteSpace(envLang) then
+            replaced
+        else
+            let langCode = envLang.Trim()
+            let trimmed = replaced.TrimEnd('/')
+            $"{trimmed}/{langCode}"
 
     // Main function to process the URL and return the Tweet structure
     let private getTweetFromUrlAsync (url: string) =
@@ -28,8 +42,12 @@ module private Twitter =
             let options = JsonSerializerOptions()
             options.PropertyNameCaseInsensitive <- true
             match response.StatusCode with
-            | System.Net.HttpStatusCode.OK -> let! result = response.Content.ReadFromJsonAsync<Tweet> options |> Async.AwaitTask
-                                              return result |> Some
+            | System.Net.HttpStatusCode.OK ->
+                let! result = response.Content.ReadFromJsonAsync<FxTweetResponse> options |> Async.AwaitTask
+                if result.code = 200 then
+                    return Some (FxConverter.toTweet result.tweet)
+                else
+                    return None
             | _ -> return None
         }
 
@@ -58,18 +76,37 @@ module private Twitter =
             match tweet with
             | None -> return None
             | Some tweet ->
+                let textToUse =
+                    match tweet.translation with
+                    | Some tl when not (System.String.IsNullOrWhiteSpace(tl.text)) ->
+                        let direction = $"{tl.source_language.ToUpper()}→{tl.destination_language.ToUpper()}"
+                        Some $"<i>【TL {direction}】</i>\n{tl.text}"
+                    | _ -> tweet.text
+
+                let qrtTextToUse =
+                    match tweet.qrt with
+                    | Some qrt ->
+                        match qrt.translation with
+                        | Some tl when not (System.String.IsNullOrWhiteSpace(tl.text)) ->
+                            let direction = $"{tl.source_language.ToUpper()}→{tl.destination_language.ToUpper()}"
+                            Some $"<i>【TL {direction}】</i>\n{tl.text}"
+                        | _ -> qrt.text
+                    | None -> None
+
                 let replyText =
-                    match tweet.user_screen_name, tweet.user_name, tweet.text, tweet.qrt with
+                    match tweet.user_screen_name, tweet.user_name, textToUse, tweet.qrt with
                     | ah,
                       a,
                       Some t,
-                      Some {
-                               user_name = qa
-                               user_screen_name = qah
-                               text = Some qtxt
-                           } ->
-                        Some
-                            $"""<b>{a}</b> <i>(@​{ah})</i>:<blockquote>{t}</blockquote>Quoting <b>{qa}</b><i>(@​{qah})</i>:<blockquote>{qtxt}</blockquote>"""
+                      Some qrt ->
+                        match qrtTextToUse with
+                        | Some qtxt ->
+                            let qa = qrt.user_name
+                            let qah = qrt.user_screen_name
+                            Some
+                                $"""<b>{a}</b> <i>(@​{ah})</i>:<blockquote>{t}</blockquote>Quoting <b>{qa}</b><i>(@​{qah})</i>:<blockquote>{qtxt}</blockquote>"""
+                        | None ->
+                            Some $"<b>{a}</b> <i>(@​{ah})</i>: <blockquote>{t}</blockquote>"
                     | ah, a, Some t, _ -> Some $"<b>{a}</b> <i>(@​{ah})</i>: <blockquote>{t}</blockquote>"
                     | ah, a, _, _ -> Some $"<b>{a}</b> <i>(@​{ah})</i>:"
 
