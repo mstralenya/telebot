@@ -22,14 +22,19 @@ module private Youtube =
             RegexOptions.Compiled
         )
 
+    let private isAudioRequested (text: string) =
+        text.IndexOf("audio", StringComparison.OrdinalIgnoreCase) >= 0 ||
+        text.IndexOf("mp3", StringComparison.OrdinalIgnoreCase) >= 0 ||
+        text.IndexOf("music", StringComparison.OrdinalIgnoreCase) >= 0
+
     let getYoutubeAudioLinks (message: string option) =
         match message with
-        | Some text when text.IndexOf("audio", StringComparison.OrdinalIgnoreCase) >= 0 -> getLinks youtubeRegex message
+        | Some text when isAudioRequested text -> getLinks youtubeRegex message
         | _ -> List.empty
 
     let getYoutubeVideoLinks (message: string option) =
         match message with
-        | Some text when text.IndexOf("audio", StringComparison.OrdinalIgnoreCase) < 0 -> getLinks youtubeRegex message
+        | Some text when not (isAudioRequested text) -> getLinks youtubeRegex message
         | _ -> List.empty
 
     let private runProcess (fileName: string) (args: string) (workingDir: string option) : int * string * string =
