@@ -376,6 +376,98 @@ let getVideoSizeAsync (filePath: string) : Async<int64 option * int64 option * i
 let getVideoSize (filePath: string) =
     getVideoSizeAsync filePath |> Async.RunSynchronously
 
+// Shrink video if it is larger than 50MB (using 48MB threshold for safety margin)
+let shrinkVideoIfNeededAsync (videoPath: string) : Async<string> =
+    withOperationTelemetry "video_shrink" (fun scope ->
+        async {
+            try
+                TelemetryScope.addProperty "video_path" videoPath scope |> ignore
+                
+                if not (File.Exists videoPath) then
+                    return videoPath
+                else
+                    let fileInfo = FileInfo videoPath
+                    let limit = 50L * 1024L * 1024L
+                    let threshold = 48L * 1024L * 1024L
+                    
+                    if fileInfo.Length <= threshold then
+                        return videoPath
+                    else
+                        TelemetryScope.logInfo $"Video file size ({fileInfo.Length} bytes) exceeds threshold. Initiating shrink." scope
+                        
+                        let! videoInfo = getVideoInfoAsync videoPath
+                        let tempFile = $"{videoPath}.compressed.mp4"
+                        
+                        let ffmpegArgs =
+                            match videoInfo with
+                            | Some (duration, _, _) when duration > 0L ->
+                                // Calculate target bitrate to fit in ~45MB
+                                let targetBytes = 45L * 1024L * 1024L
+                                let targetSizeInBits = float targetBytes * 8.0
+                                let totalBitrate = targetSizeInBits / float duration
+                                
+                                let audioBitrate = 96000.0
+                                let videoBitrate = Math.Max(totalBitrate - audioBitrate, 100000.0)
+                                
+                                let scaleFilter =
+                                    if videoBitrate < 800000.0 then "scale='min(854,iw)':-2"
+                                    elif videoBitrate < 2000000.0 then "scale='min(1280,iw)':-2"
+                                    else "scale='min(1920,iw)':-2"
+                                
+                                TelemetryScope.logInfo $"Calculated video bitrate: {videoBitrate} bps, audio: {audioBitrate} bps, scale: {scaleFilter}" scope
+                                
+                                sprintf "-y -v error -i \"%s\" -c:v libx264 -b:v %.0f -maxrate %.0f -bufsize %.0f -vf \"%s\" -c:a aac -b:a %.0f -movflags +faststart \"%s\""
+                                    videoPath videoBitrate videoBitrate (videoBitrate * 2.0) scaleFilter audioBitrate tempFile
+                            | _ ->
+                                TelemetryScope.logWarning "Video duration not found. Falling back to default CRF-based compression." scope
+                                sprintf "-y -v error -i \"%s\" -c:v libx264 -crf 28 -preset fast -c:a aac -b:a 128k -movflags +faststart \"%s\""
+                                    videoPath tempFile
+                        
+                        let ffmpegInfo =
+                            ProcessStartInfo(
+                                FileName = "ffmpeg",
+                                Arguments = ffmpegArgs,
+                                UseShellExecute = false,
+                                RedirectStandardError = true,
+                                RedirectStandardOutput = true,
+                                CreateNoWindow = true
+                            )
+                            
+                        use ffmpegProcess = new Process(StartInfo = ffmpegInfo)
+                        let! startResult = Task.Run(fun () -> ffmpegProcess.Start()) |> Async.AwaitTask
+                        
+                        if startResult then
+                            do! Task.Run(fun () -> ffmpegProcess.WaitForExit()) |> Async.AwaitTask
+                            if ffmpegProcess.ExitCode = 0 && File.Exists tempFile then
+                                let compressedInfo = FileInfo tempFile
+                                if compressedInfo.Length < limit then
+                                    File.Delete videoPath
+                                    File.Move(tempFile, videoPath)
+                                    TelemetryScope.logInfo $"Video shrunk successfully. New size: {compressedInfo.Length} bytes" scope
+                                    return videoPath
+                                else
+                                    TelemetryScope.logWarning $"Shrunk video is still too large ({compressedInfo.Length} bytes). Deleting temp file." scope
+                                    if File.Exists tempFile then File.Delete tempFile
+                                    return videoPath
+                            else
+                                let! error = ffmpegProcess.StandardError.ReadToEndAsync() |> Async.AwaitTask
+                                TelemetryScope.logError None $"ffmpeg size reduction failed. Code: {ffmpegProcess.ExitCode}, Error: {error}" scope
+                                if File.Exists tempFile then File.Delete tempFile
+                                return videoPath
+                        else
+                            TelemetryScope.logError None "Failed to start ffmpeg process for video shrinking" scope
+                            return videoPath
+            with
+            | ex ->
+                TelemetryScope.logError (Some ex) "Error during video shrinking" scope
+                return videoPath
+        }
+    )
+
+// Backward compatibility synchronous version
+let shrinkVideoIfNeeded (videoPath: string) : string =
+    shrinkVideoIfNeededAsync videoPath |> Async.RunSynchronously
+
 // Clean up temporary files asynchronously
 let cleanupTemporaryFilesAsync (files: string list) : Async<unit> =
     withOperationTelemetry "cleanup_temp_files" (fun scope ->

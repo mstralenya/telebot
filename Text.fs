@@ -1,4 +1,4 @@
-﻿module Telebot.Text
+module Telebot.Text
 
 open System.Text.RegularExpressions
 open System.IO
@@ -27,6 +27,10 @@ module Reply =
 
     /// Creates a Message reply.
     let createMessage text = Message text
+
+    let createReplies replies = Replies replies
+
+    let createRichMessage html = RichMessage html
 
 let getLinks (regex: Regex) (text: string option) =
     text
@@ -173,24 +177,31 @@ let private sendMediaGallery
 
     media |> Seq.map string |> Seq.iter deleteFile
 
-let reply (reply: Reply, messageId: MessageId, chatId: ChatId, ctx: UpdateContext) =
-    match reply with
+let rec reply (replyObj: Reply, messageId: MessageId, chatId: ChatId, ctx: UpdateContext) =
+    match replyObj with
     | VideoFile videoFile ->
-        let fileInfo = FileInfo videoFile.File
+        let videoPath = shrinkVideoIfNeeded videoFile.File
+        let fileInfo = FileInfo videoPath
 
         if fileInfo.Length > 50L * 1024L * 1024L then
-            Log.Information $"File size is greater than 50 MB. Deleting file: %s{videoFile.File}"
-            deleteFile videoFile.File
+            Log.Information $"File size is greater than 50 MB. Deleting file: %s{videoPath}"
+            deleteFile videoPath
         else
             let caption = truncateWithEllipsis videoFile.Caption 1024
-            sendVideoWithThumbnail videoFile.File caption messageId chatId ctx
+            sendVideoWithThumbnail videoPath caption messageId chatId ctx
 
     | AudioFile audioFile -> sendAudio audioFile messageId chatId ctx
 
     | Gallery imageGallery ->
         let caption = truncateWithEllipsis imageGallery.Caption 1024
 
-        match imageGallery.Media with
+        let processedMedia =
+            imageGallery.Media
+            |> List.map (function
+                | Photo p -> Photo p
+                | Video v -> Video (shrinkVideoIfNeeded v))
+
+        match processedMedia with
         | [ singleMedia ] ->
             match singleMedia with
             | Photo p -> sendMediaWithCaption p caption messageId chatId ctx
@@ -204,6 +215,25 @@ let reply (reply: Reply, messageId: MessageId, chatId: ChatId, ctx: UpdateContex
                 message,
                 replyParameters = ReplyParameters.Create(messageId.MessageId, chatId),
                 parseMode = ParseMode.HTML
+            )
+
+        sendRequestAsync req ctx |> Async.Start
+
+    | Replies replies ->
+        replies |> List.iter (fun r -> reply (r, messageId, chatId, ctx))
+
+    | RichMessage html ->
+        let richMsg : InputRichMessage = {
+            Html = Some html
+            Markdown = None
+            IsRtl = None
+            SkipEntityDetection = None
+        }
+        let req =
+            Req.SendRichMessage.Make(
+                chatId,
+                richMsg,
+                replyParameters = ReplyParameters.Create(messageId.MessageId, chatId)
             )
 
         sendRequestAsync req ctx |> Async.Start
