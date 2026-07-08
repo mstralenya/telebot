@@ -58,13 +58,17 @@ module private Youtube =
             else
                 p.BeginOutputReadLine()
                 p.BeginErrorReadLine()
-                p.WaitForExit()
-                (p.ExitCode, stdout.ToString(), stderr.ToString())
+                if p.WaitForExit(300000) then
+                    (p.ExitCode, stdout.ToString(), stderr.ToString())
+                else
+                    try p.Kill(true) with _ -> ()
+                    (-1, stdout.ToString(), "Process execution timed out after 5 minutes")
         with ex ->
             (-1, "", ex.ToString())
 
     let private bytesInMiB = 1024L * 1024L
     let private sizeLimitBytes = 50L * bytesInMiB
+    let private maxDownloadSizeBeforeReencode = 500L * bytesInMiB
 
     // Resolve tool executable path robustly (Windows adds .exe)
     let private resolveToolPath (baseName: string) =
@@ -503,22 +507,25 @@ module private Youtube =
                         let fi = FileInfo(path)
                         if fi.Length > sizeLimitBytes then
                             Log.Warning("Downloaded file exceeds limit: {len} bytes > {limit}", fi.Length, sizeLimitBytes)
-                            // Try to downscale via ffmpeg quick re-encode with bitrate based on duration
-                            if duration > 0.0 then
-                                let targetBytes = sizeLimitBytes
-                                let audioKbps = defaultArg a.abr (defaultArg a.tbr 128.0)
-                                // leave ~25% for audio
-                                let audioBytes = int64 (audioKbps * 1000.0 / 8.0 * duration)
-                                let videoBytes = max 1L (targetBytes - audioBytes)
-                                let videoKbps = max 250.0 (float videoBytes * 8.0 / 1000.0 / duration)
-                                let tmp = Path.ChangeExtension(path, ".smaller.mp4")
-                                let ffArgs = $"-y -i \"{path}\" -c:v libx264 -b:v {videoKbps:F0}k -c:a copy -movflags +faststart \"{tmp}\""
-                                let code, _o, e = runProcess ffmpegExe ffArgs None
-                                if code = 0 && File.Exists tmp then
-                                    try File.Delete path with _ -> ()
-                                    File.Move(tmp, path, true)
-                                else
-                                    Log.Error("ffmpeg size reduction failed: {err}", e)
+                            if fi.Length > maxDownloadSizeBeforeReencode then
+                                Log.Warning("Downloaded file size {len} bytes exceeds the maximum {max} bytes for downscaling. Skipping re-encoding.", fi.Length, maxDownloadSizeBeforeReencode)
+                            else
+                                // Try to downscale via ffmpeg quick re-encode with bitrate based on duration
+                                if duration > 0.0 then
+                                    let targetBytes = sizeLimitBytes
+                                    let audioKbps = defaultArg a.abr (defaultArg a.tbr 128.0)
+                                    // leave ~25% for audio
+                                    let audioBytes = int64 (audioKbps * 1000.0 / 8.0 * duration)
+                                    let videoBytes = max 1L (targetBytes - audioBytes)
+                                    let videoKbps = max 250.0 (float videoBytes * 8.0 / 1000.0 / duration)
+                                    let tmp = Path.ChangeExtension(path, ".smaller.mp4")
+                                    let ffArgs = $"-y -i \"{path}\" -c:v libx264 -b:v {videoKbps:F0}k -c:a copy -movflags +faststart \"{tmp}\""
+                                    let code, _o, e = runProcess ffmpegExe ffArgs None
+                                    if code = 0 && File.Exists tmp then
+                                        try File.Delete path with _ -> ()
+                                        File.Move(tmp, path, true)
+                                    else
+                                        Log.Error("ffmpeg size reduction failed: {err}", e)
                             ()
                         let finalSize = (FileInfo(path)).Length
                         if finalSize > sizeLimitBytes then
