@@ -16,8 +16,8 @@ open Telebot.Text
 open Telebot.Text.Reply
 open Wolverine.Attributes
 
-module private Youtube =
-    let private youtubeRegex =
+module Youtube =
+    let youtubeRegex =
         Regex(
             @"https:\/\/(youtu\.be\/[a-zA-Z0-9_-]+|(?:www\.)?youtube\.com\/(watch\?v=[a-zA-Z0-9_-]+|shorts\/[a-zA-Z0-9_-]+))",
             RegexOptions.Compiled

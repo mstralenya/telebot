@@ -14,7 +14,7 @@ open Telebot.Text.Reply
 open Telebot.VideoDownloader
 open Wolverine.Attributes
 
-module private TikTok =
+module TikTok =
     let private getJsonToken (json: JObject) token =
         json.SelectToken token
         |> Option.ofObj
@@ -33,7 +33,7 @@ module private TikTok =
             | _ -> return None
         }
 
-    let private tikTokRegex =
+    let tikTokRegex =
         Regex(@"http(s)?://(www\.)?(\w+\.)?tiktok.com/(.*)", RegexOptions.Compiled)
 
     let getTikTokAudioLinks (message: string option) =

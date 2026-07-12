@@ -13,7 +13,7 @@ open Telebot.Text
 open Telebot.TwitterData
 open Telebot.VideoDownloader
 
-module private Twitter =
+module Twitter =
     // Function to replace the domain in the URL and append translation language suffix if configured
     let private replaceDomain (url: string) =
         let envLang = System.Environment.GetEnvironmentVariable("TWITTER_TRANSLATION_LANG")
@@ -63,7 +63,7 @@ module private Twitter =
                 return None
         }
 
-    let private twitterRegex =
+    let twitterRegex =
         Regex(@"https://(x|twitter).com/.*/status/(\d+)", RegexOptions.Compiled)
 
     let private formatMedia (mediaList: TwitterMediaExtended list) =
