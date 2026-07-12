@@ -10,6 +10,7 @@ open Newtonsoft.Json.Linq
 open Serilog
 open Telebot.Bus
 open Telebot.Handlers
+open Telebot.PrometheusMetrics
 open Telebot.Messages
 open Telebot.Text
 open Telebot.Text.Reply
@@ -475,95 +476,114 @@ module private Youtube =
 
     let getYoutubeReply (url: string) =
         async {
-            match getJson url with
-            | None ->
-                let msg = createMessage "Failed to fetch video info"
-                return Some msg
-            | Some json ->
-                let title = json.SelectToken("title") |> Option.ofObj |> Option.map string
-                let id = json.SelectToken("id") |> Option.ofObj |> Option.map string |> Option.defaultValue (Guid.NewGuid().ToString("N"))
-                let duration =
-                    match json.SelectToken("duration") with
-                    | null -> 0.0
-                    | v ->
-                        match Double.TryParse(string v) with
-                        | true, d -> d
-                        | _ -> 0.0
-                let formats = parseFormats json
-                Log.Information("Found {count} formats for YouTube video {id}", formats.Length, id)
-                match pickBestCombo duration formats with
+            try
+                match getJson url with
                 | None ->
-                    let message = createMessage "Cannot download video due size limits - max size is 50 MiB"
-                    return Some message
-                | Some (v, a, est) ->
-                    let fileName = $"yt_{id}_{Guid.NewGuid()}.mp4"
-                    Log.Information("Downloading YouTube: {title} using v={v} a={a} est={est}", title |> Option.defaultValue "", v.format_id, a.format_id, est)
-                    let ok, path = runYtDlpDownload url v.format_id a.format_id fileName
-                    if not ok then
-                        cleanupArtifacts fileName (Some id) (Some v.format_id) (Some a.format_id)
-                        let message = createMessage "Failed to download or convert video"
+                    let msg = createMessage "Failed to fetch video info"
+                    youtubeFailureCounter.Inc()
+                    return Some msg
+                | Some json ->
+                    let title = json.SelectToken("title") |> Option.ofObj |> Option.map string
+                    let id = json.SelectToken("id") |> Option.ofObj |> Option.map string |> Option.defaultValue (Guid.NewGuid().ToString("N"))
+                    let duration =
+                        match json.SelectToken("duration") with
+                        | null -> 0.0
+                        | v ->
+                            match Double.TryParse(string v) with
+                            | true, d -> d
+                            | _ -> 0.0
+                    let formats = parseFormats json
+                    Log.Information("Found {count} formats for YouTube video {id}", formats.Length, id)
+                    match pickBestCombo duration formats with
+                    | None ->
+                        let message = createMessage "Cannot download video due size limits - max size is 50 MiB"
+                        youtubeFailureCounter.Inc()
                         return Some message
-                    else
-                        let fi = FileInfo(path)
-                        if fi.Length > sizeLimitBytes then
-                            Log.Warning("Downloaded file exceeds limit: {len} bytes > {limit}", fi.Length, sizeLimitBytes)
-                            if fi.Length > maxDownloadSizeBeforeReencode then
-                                Log.Warning("Downloaded file size {len} bytes exceeds the maximum {max} bytes for downscaling. Skipping re-encoding.", fi.Length, maxDownloadSizeBeforeReencode)
-                            else
-                                // Try to downscale via ffmpeg quick re-encode with bitrate based on duration
-                                if duration > 0.0 then
-                                    let targetBytes = sizeLimitBytes
-                                    let audioKbps = defaultArg a.abr (defaultArg a.tbr 128.0)
-                                    // leave ~25% for audio
-                                    let audioBytes = int64 (audioKbps * 1000.0 / 8.0 * duration)
-                                    let videoBytes = max 1L (targetBytes - audioBytes)
-                                    let videoKbps = max 250.0 (float videoBytes * 8.0 / 1000.0 / duration)
-                                    let tmp = Path.ChangeExtension(path, ".smaller.mp4")
-                                    let ffArgs = $"-y -i \"{path}\" -c:v libx264 -b:v {videoKbps:F0}k -c:a copy -movflags +faststart \"{tmp}\""
-                                    let code, _o, e = runProcess ffmpegExe ffArgs None
-                                    if code = 0 && File.Exists tmp then
-                                        try File.Delete path with _ -> ()
-                                        File.Move(tmp, path, true)
-                                    else
-                                        Log.Error("ffmpeg size reduction failed: {err}", e)
-                            ()
-                        let finalSize = (FileInfo(path)).Length
-                        if finalSize > sizeLimitBytes then
-                            let message = createMessage "Cannot download video due size limits - max size is 50 MiB"
-                            try File.Delete path with _ -> ()
+                    | Some (v, a, est) ->
+                        let fileName = $"yt_{id}_{Guid.NewGuid()}.mp4"
+                        Log.Information("Downloading YouTube: {title} using v={v} a={a} est={est}", title |> Option.defaultValue "", v.format_id, a.format_id, est)
+                        let ok, path = runYtDlpDownload url v.format_id a.format_id fileName
+                        if not ok then
                             cleanupArtifacts fileName (Some id) (Some v.format_id) (Some a.format_id)
+                            let message = createMessage "Failed to download or convert video"
+                            youtubeFailureCounter.Inc()
                             return Some message
                         else
-                            // Success path: proactively remove any orphan/part artifacts for this video id
-                            cleanupArtifacts fileName (Some id) (Some v.format_id) (Some a.format_id)
-                            let reply = createVideoFileWithCaption path title
-                            return Some reply
+                            let fi = FileInfo(path)
+                            if fi.Length > sizeLimitBytes then
+                                Log.Warning("Downloaded file exceeds limit: {len} bytes > {limit}", fi.Length, sizeLimitBytes)
+                                if fi.Length > maxDownloadSizeBeforeReencode then
+                                    Log.Warning("Downloaded file size {len} bytes exceeds the maximum {max} bytes for downscaling. Skipping re-encoding.", fi.Length, maxDownloadSizeBeforeReencode)
+                                else
+                                    // Try to downscale via ffmpeg quick re-encode with bitrate based on duration
+                                    if duration > 0.0 then
+                                        let targetBytes = sizeLimitBytes
+                                        let audioKbps = defaultArg a.abr (defaultArg a.tbr 128.0)
+                                        // leave ~25% for audio
+                                        let audioBytes = int64 (audioKbps * 1000.0 / 8.0 * duration)
+                                        let videoBytes = max 1L (targetBytes - audioBytes)
+                                        let videoKbps = max 250.0 (float videoBytes * 8.0 / 1000.0 / duration)
+                                        let tmp = Path.ChangeExtension(path, ".smaller.mp4")
+                                        let ffArgs = $"-y -i \"{path}\" -c:v libx264 -b:v {videoKbps:F0}k -c:a copy -movflags +faststart \"{tmp}\""
+                                        let code, _o, e = runProcess ffmpegExe ffArgs None
+                                        if code = 0 && File.Exists tmp then
+                                            try File.Delete path with _ -> ()
+                                            File.Move(tmp, path, true)
+                                        else
+                                            Log.Error("ffmpeg size reduction failed: {err}", e)
+                                ()
+                            let finalSize = (FileInfo(path)).Length
+                            if finalSize > sizeLimitBytes then
+                                let message = createMessage "Cannot download video due size limits - max size is 50 MiB"
+                                try File.Delete path with _ -> ()
+                                cleanupArtifacts fileName (Some id) (Some v.format_id) (Some a.format_id)
+                                youtubeFailureCounter.Inc()
+                                return Some message
+                            else
+                                // Success path: proactively remove any orphan/part artifacts for this video id
+                                cleanupArtifacts fileName (Some id) (Some v.format_id) (Some a.format_id)
+                                let reply = createVideoFileWithCaption path title
+                                youtubeSuccessCounter.Inc()
+                                return Some reply
+            with ex ->
+                Log.Error(ex, "Error processing YouTube video")
+                youtubeFailureCounter.Inc()
+                return None
         }
         |> Async.RunSynchronously
 
     let getYoutubeAudioReply (url: string) =
         async {
-            match getJson url with
-            | None ->
-                let msg = createMessage "Failed to fetch video info"
-                return Some msg
-            | Some json ->
-                let id = json.SelectToken("id") |> Option.ofObj |> Option.map string |> Option.defaultValue (Guid.NewGuid().ToString("N"))
-                let formats = parseFormats json
-                let audios = formats |> Array.filter (fun f -> f.acodec |> Option.exists (fun a -> a <> "none") && f.vcodec |> Option.exists (fun v -> v = "none"))
-                if audios.Length = 0 then
-                    return Some (createMessage "No audio-only formats found")
-                else
-                    let best = audios |> Array.sortByDescending (fun a -> defaultArg a.abr 0.0) |> Array.head
-                    let ext = defaultArg best.ext "m4a"
-                    let fileName = $"yt_{id}_{Guid.NewGuid()}.{ext}"
-                    let args = $"-f {best.format_id}{cookiesArg}{proxyArg()} -o \"{fileName}\" \"{url}\""
-                    let code, _o, e = runProcess ytDlpExe args None
-                    if code <> 0 || not (File.Exists fileName) then
-                        Log.Error("yt-dlp audio download failed: {err}", e)
-                        return Some (createMessage "Failed to download audio")
+            try
+                match getJson url with
+                | None ->
+                    let msg = createMessage "Failed to fetch video info"
+                    youtubeFailureCounter.Inc()
+                    return Some msg
+                | Some json ->
+                    let id = json.SelectToken("id") |> Option.ofObj |> Option.map string |> Option.defaultValue (Guid.NewGuid().ToString("N"))
+                    let formats = parseFormats json
+                    let audios = formats |> Array.filter (fun f -> f.acodec |> Option.exists (fun a -> a <> "none") && f.vcodec |> Option.exists (fun v -> v = "none"))
+                    if audios.Length = 0 then
+                        youtubeFailureCounter.Inc()
+                        return Some (createMessage "No audio-only formats found")
                     else
-                        return Some (createAudioFile fileName)
+                        let best = audios |> Array.sortByDescending (fun a -> defaultArg a.abr 0.0) |> Array.head
+                        let ext = defaultArg best.ext "m4a"
+                        let fileName = $"yt_{id}_{Guid.NewGuid()}.{ext}"
+                        let args = $"-f {best.format_id}{cookiesArg}{proxyArg()} -o \"{fileName}\" \"{url}\""
+                        let code, _o, e = runProcess ytDlpExe args None
+                        if code <> 0 || not (File.Exists fileName) then
+                            Log.Error("yt-dlp audio download failed: {err}", e)
+                            youtubeFailureCounter.Inc()
+                            return Some (createMessage "Failed to download audio")
+                        else
+                            youtubeSuccessCounter.Inc()
+                            return Some (createAudioFile fileName)
+            with ex ->
+                Log.Error(ex, "Error processing YouTube audio")
+                youtubeFailureCounter.Inc()
+                return None
         }
         |> Async.RunSynchronously
 

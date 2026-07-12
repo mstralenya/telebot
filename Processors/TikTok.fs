@@ -4,8 +4,10 @@ open System
 open System.Net
 open System.Text.RegularExpressions
 open Newtonsoft.Json.Linq
+open Serilog
 open Telebot.Bus
 open Telebot.Handlers
+open Telebot.PrometheusMetrics
 open Telebot.Messages
 open Telebot.Text
 open Telebot.Text.Reply
@@ -46,36 +48,54 @@ module private TikTok =
 
     let private getAudioReply url =
         async {
-            let! apiResponse = fetchTikTokUrl url
+            try
+                let! apiResponse = fetchTikTokUrl url
 
-            match apiResponse with
-            | Some jObject ->
-                let audioUrl = getJsonToken jObject "data.music"
-
-                let fileName = $"tt_{Guid.NewGuid()}.mp3"
-
-                let useProxy = Telebot.HttpClient.ProxyConfig.useProxyForTikTok()
-                do! downloadFileAsync audioUrl fileName useProxy
-
-                return Some(createAudioFile fileName)
-            | None -> return Some(createMessage "Failed to download tiktok audio")
+                match apiResponse with
+                | Some jObject ->
+                    let audioUrl = getJsonToken jObject "data.music"
+                    if String.IsNullOrWhiteSpace(audioUrl) then
+                        tiktokFailureMetric.Inc()
+                        return Some(createMessage "Failed to download tiktok audio")
+                    else
+                        let fileName = $"tt_{Guid.NewGuid()}.mp3"
+                        let useProxy = Telebot.HttpClient.ProxyConfig.useProxyForTikTok()
+                        do! downloadFileAsync audioUrl fileName useProxy
+                        tiktokSuccessMetric.Inc()
+                        return Some(createAudioFile fileName)
+                | None ->
+                    tiktokFailureMetric.Inc()
+                    return Some(createMessage "Failed to download tiktok audio")
+            with ex ->
+                Log.Error(ex, "Error processing TikTok audio")
+                tiktokFailureMetric.Inc()
+                return None
         }
 
     let private getVideoReply url =
         async {
-            let! apiResponse = fetchTikTokUrl url
+            try
+                let! apiResponse = fetchTikTokUrl url
 
-            match apiResponse with
-            | Some jObject ->
-                let videoUrl = getJsonToken jObject "data.play"
-
-                let fileName = $"tt_{Guid.NewGuid()}.mp4"
-
-                let useProxy = Telebot.HttpClient.ProxyConfig.useProxyForTikTok()
-                do! downloadFileAsync videoUrl fileName useProxy
-
-                return Some(createVideoFile fileName)
-            | None -> return Some(createMessage "Failed to download tiktok video")
+                match apiResponse with
+                | Some jObject ->
+                    let videoUrl = getJsonToken jObject "data.play"
+                    if String.IsNullOrWhiteSpace(videoUrl) then
+                        tiktokFailureMetric.Inc()
+                        return Some(createMessage "Failed to download tiktok video")
+                    else
+                        let fileName = $"tt_{Guid.NewGuid()}.mp4"
+                        let useProxy = Telebot.HttpClient.ProxyConfig.useProxyForTikTok()
+                        do! downloadFileAsync videoUrl fileName useProxy
+                        tiktokSuccessMetric.Inc()
+                        return Some(createVideoFile fileName)
+                | None ->
+                    tiktokFailureMetric.Inc()
+                    return Some(createMessage "Failed to download tiktok video")
+            with ex ->
+                Log.Error(ex, "Error processing TikTok video")
+                tiktokFailureMetric.Inc()
+                return None
         }
 
     let getTikTokReply (isVideo: bool) (url: string) =

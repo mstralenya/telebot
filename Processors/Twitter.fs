@@ -7,6 +7,7 @@ open System.Text.RegularExpressions
 open Serilog
 open Telebot.Bus
 open Telebot.Handlers
+open Telebot.PrometheusMetrics
 open Telebot.Messages
 open Telebot.Text
 open Telebot.TwitterData
@@ -82,86 +83,94 @@ module private Twitter =
 
     let getTwitterReplyAsync (url: string) =
         async {
-            let! tweetOpt = getTweetFromUrlAsync url
-            match tweetOpt with
-            | None -> return None
-            | Some tweet ->
-                let! tweet =
-                    async {
-                        let envLang = System.Environment.GetEnvironmentVariable("TWITTER_TRANSLATION_LANG")
-                        let isLlmEnabled = Translation.getLlmApiUrl().IsSome
-                        if isLlmEnabled && not (System.String.IsNullOrWhiteSpace(envLang)) then
-                            let targetLang = envLang.Trim()
-                            let! mainTl =
-                                match tweet.text with
-                                | Some txt when not (System.String.IsNullOrWhiteSpace(txt)) ->
-                                    Translation.translateTextAsync txt targetLang
-                                | _ -> async { return None }
-                            let! qrtTl =
-                                match tweet.qrt with
-                                | Some qrt ->
-                                    match qrt.text with
+            try
+                let! tweetOpt = getTweetFromUrlAsync url
+                match tweetOpt with
+                | None ->
+                    twitterFailureCounter.Inc()
+                    return None
+                | Some tweet ->
+                    let! tweet =
+                        async {
+                            let envLang = System.Environment.GetEnvironmentVariable("TWITTER_TRANSLATION_LANG")
+                            let isLlmEnabled = Translation.getLlmApiUrl().IsSome
+                            if isLlmEnabled && not (System.String.IsNullOrWhiteSpace(envLang)) then
+                                let targetLang = envLang.Trim()
+                                let! mainTl =
+                                    match tweet.text with
                                     | Some txt when not (System.String.IsNullOrWhiteSpace(txt)) ->
                                         Translation.translateTextAsync txt targetLang
                                     | _ -> async { return None }
-                                | None -> async { return None }
-                            
-                            let updatedQrt =
-                                tweet.qrt
-                                |> Option.map (fun qrt ->
-                                    match qrtTl with
-                                    | Some tl -> { qrt with translation = Some tl }
-                                    | None -> qrt
-                                )
-                            
-                            let updatedTweet =
-                                match mainTl with
-                                | Some tl -> { tweet with translation = Some tl; qrt = updatedQrt }
-                                | None -> { tweet with qrt = updatedQrt }
-                            return updatedTweet
-                        else
-                            return tweet
-                    }
+                                let! qrtTl =
+                                    match tweet.qrt with
+                                    | Some qrt ->
+                                        match qrt.text with
+                                        | Some txt when not (System.String.IsNullOrWhiteSpace(txt)) ->
+                                            Translation.translateTextAsync txt targetLang
+                                        | _ -> async { return None }
+                                    | None -> async { return None }
+                                
+                                let updatedQrt =
+                                    tweet.qrt
+                                    |> Option.map (fun qrt ->
+                                        match qrtTl with
+                                        | Some tl -> { qrt with translation = Some tl }
+                                        | None -> qrt
+                                    )
+                                
+                                let updatedTweet =
+                                    match mainTl with
+                                    | Some tl -> { tweet with translation = Some tl; qrt = updatedQrt }
+                                    | None -> { tweet with qrt = updatedQrt }
+                                return updatedTweet
+                            else
+                                return tweet
+                        }
 
-                let textToUse =
-                    match tweet.translation with
-                    | Some tl when not (System.String.IsNullOrWhiteSpace(tl.text)) ->
-                        let direction = $"{tl.source_language.ToUpper()}→{tl.destination_language.ToUpper()}"
-                        Log.Information("Successfully retrieved translation for tweet {TweetId} ({Direction})", tweet.tweetID, direction)
-                        Some $"<i>【TL {direction}】</i>\n{tl.text}"
-                    | _ -> tweet.text
-
-                let qrtTextToUse =
-                    match tweet.qrt with
-                    | Some qrt ->
-                        match qrt.translation with
+                    let textToUse =
+                        match tweet.translation with
                         | Some tl when not (System.String.IsNullOrWhiteSpace(tl.text)) ->
                             let direction = $"{tl.source_language.ToUpper()}→{tl.destination_language.ToUpper()}"
-                            Log.Information("Successfully retrieved translation for quoted tweet {TweetId} ({Direction})", qrt.tweetID, direction)
+                            Log.Information("Successfully retrieved translation for tweet {TweetId} ({Direction})", tweet.tweetID, direction)
                             Some $"<i>【TL {direction}】</i>\n{tl.text}"
-                        | _ -> qrt.text
-                    | None -> None
+                        | _ -> tweet.text
 
-                let mainText =
-                    match tweet.user_screen_name, tweet.user_name, textToUse with
-                    | ah, a, Some t -> $"<b>{a}</b> <i>(@​{ah})</i>: <blockquote>{t}</blockquote>"
-                    | ah, a, _ -> $"<b>{a}</b> <i>(@​{ah})</i>:"
+                    let qrtTextToUse =
+                        match tweet.qrt with
+                        | Some qrt ->
+                            match qrt.translation with
+                            | Some tl when not (System.String.IsNullOrWhiteSpace(tl.text)) ->
+                                let direction = $"{tl.source_language.ToUpper()}→{tl.destination_language.ToUpper()}"
+                                Log.Information("Successfully retrieved translation for quoted tweet {TweetId} ({Direction})", qrt.tweetID, direction)
+                                Some $"<i>【TL {direction}】</i>\n{tl.text}"
+                            | _ -> qrt.text
+                        | None -> None
 
-                let mainMedia = formatMedia tweet.media_extended
+                    let mainText =
+                        match tweet.user_screen_name, tweet.user_name, textToUse with
+                        | ah, a, Some t -> $"<b>{a}</b> <i>(@​{ah})</i>: <blockquote>{t}</blockquote>"
+                        | ah, a, _ -> $"<b>{a}</b> <i>(@​{ah})</i>:"
 
-                let quotedContent =
-                    match tweet.qrt with
-                    | Some qrt ->
-                        let qrtText =
-                            match qrt.user_screen_name, qrt.user_name, qrtTextToUse with
-                            | qah, qa, Some qtxt -> $"Quoting <b>{qa}</b> <i>(@​{qah})</i>: <blockquote>{qtxt}</blockquote>"
-                            | qah, qa, _ -> $"Quoting <b>{qa}</b> <i>(@​{qah})</i>:"
-                        let qrtMedia = formatMedia qrt.media_extended
-                        qrtText + qrtMedia
-                    | None -> ""
+                    let mainMedia = formatMedia tweet.media_extended
 
-                let html = mainText + mainMedia + quotedContent
-                return Some (Reply.createRichMessage html)
+                    let quotedContent =
+                        match tweet.qrt with
+                        | Some qrt ->
+                            let qrtText =
+                                match qrt.user_screen_name, qrt.user_name, qrtTextToUse with
+                                | qah, qa, Some qtxt -> $"Quoting <b>{qa}</b> <i>(@​{qah})</i>: <blockquote>{qtxt}</blockquote>"
+                                | qah, qa, _ -> $"Quoting <b>{qa}</b> <i>(@​{qah})</i>:"
+                            let qrtMedia = formatMedia qrt.media_extended
+                            qrtText + qrtMedia
+                        | None -> ""
+
+                    let html = mainText + mainMedia + quotedContent
+                    twitterSuccessCounter.Inc()
+                    return Some (Reply.createRichMessage html)
+            with ex ->
+                Log.Error(ex, "Error processing Twitter link")
+                twitterFailureCounter.Inc()
+                return None
         }
 
     let getTwitterReply (url: string) =
