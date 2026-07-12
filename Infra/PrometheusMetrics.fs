@@ -27,10 +27,11 @@ let messageFailureCounter =
     Metrics.CreateCounter("telebot_failures_total", "Number of failed message processing attempts")
 
 let receivedMessagesCounter =
-    Metrics.CreateCounter("telebot_received_messages_total", "Total number of messages received by the bot", [|"chat"|])
+    Metrics.CreateCounter("telebot_received_messages_total", "Total number of messages received by the bot", [|"chat"; "chat_type"; "user"|])
 
 let unprocessedMessagesCounter =
-    Metrics.CreateCounter("telebot_unprocessed_messages_total", "Number of messages read but not processed", [|"chat"|])
+    Metrics.CreateCounter("telebot_unprocessed_messages_total", "Number of messages read but not processed", [|"chat"; "chat_type"; "user"|])
+
 
 
 // HTTP client metrics

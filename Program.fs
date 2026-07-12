@@ -75,6 +75,23 @@ let getChatOrUserName (chat: Funogram.Telegram.Types.Chat) (user: Funogram.Teleg
                 let full = $"{first} {last}".Trim()
                 if System.String.IsNullOrWhiteSpace(full) then $"Chat_{chat.Id}" else full
 
+let getChatType (chat: Funogram.Telegram.Types.Chat) =
+    match chat.Type with
+    | Funogram.Telegram.Types.ChatType.Private -> "private"
+    | _ -> "group"
+
+let getUserName (user: Funogram.Telegram.Types.User option) =
+    match user with
+    | Some u ->
+        match u.Username with
+        | Some username when not (System.String.IsNullOrWhiteSpace(username)) -> $"@{username}"
+        | _ ->
+            let first = u.FirstName
+            let last = defaultArg u.LastName ""
+            let full = $"{first} {last}".Trim()
+            if System.String.IsNullOrWhiteSpace(full) then $"User_{u.Id}" else full
+    | None -> "Unknown"
+
 let hasSupportedLinks (text: string option) =
     let ig = getLinks Telebot.Instagram.Instagram.postRegex text @ getLinks Telebot.Instagram.Instagram.shareRegex text
     let tw = getLinks Telebot.Twitter.Twitter.twitterRegex text
@@ -93,13 +110,15 @@ let updateArrivedAsync (ctx: UpdateContext) : Async<unit> =
                    From = user
                } ->
             let chatName = getChatOrUserName chat user
-            receivedMessagesCounter.WithLabels([|chatName|]).Inc()
+            let chatType = getChatType chat
+            let senderName = getUserName user
+            receivedMessagesCounter.WithLabels([|chatName; chatType; senderName|]).Inc()
 
             // Check blacklist
             let userId = user |> Option.map (fun u -> u.Id)
             if Telebot.Blacklist.isBlacklisted chat.Id userId then
                Log.Information($"Message ignored due to blacklist. ChatId: {chat.Id}, UserId: {userId}")
-               unprocessedMessagesCounter.WithLabels([|chatName|]).Inc()
+               unprocessedMessagesCounter.WithLabels([|chatName; chatType; senderName|]).Inc()
                return ()
             else
 
@@ -124,7 +143,7 @@ let updateArrivedAsync (ctx: UpdateContext) : Async<unit> =
                     newMessageCounter.Inc()
 
                     if not (hasSupportedLinks messageText) then
-                        unprocessedMessagesCounter.WithLabels([|chatName|]).Inc()
+                        unprocessedMessagesCounter.WithLabels([|chatName; chatType; senderName|]).Inc()
 
                     // Create message data
                     let mId = MessageId.Create messageId
