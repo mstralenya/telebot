@@ -31,6 +31,7 @@
     <Compile Include="HttpClient.fs" />
     <Compile Include="VideoDownloader.fs" />
     <Compile Include="Text.fs" />
+    <Compile Include="Translation.fs" />
     <Compile Include="MessageBus\Messages.fs" />
     <Compile Include="MessageBus\Bus.fs" />
     <Compile Include="MessageBus\Handlers.fs" />

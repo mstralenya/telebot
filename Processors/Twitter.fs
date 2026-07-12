@@ -82,10 +82,47 @@ module private Twitter =
 
     let getTwitterReplyAsync (url: string) =
         async {
-            let! tweet = getTweetFromUrlAsync url
-            match tweet with
+            let! tweetOpt = getTweetFromUrlAsync url
+            match tweetOpt with
             | None -> return None
             | Some tweet ->
+                let! tweet =
+                    async {
+                        let envLang = System.Environment.GetEnvironmentVariable("TWITTER_TRANSLATION_LANG")
+                        let isLlmEnabled = Translation.getLlmApiUrl().IsSome
+                        if isLlmEnabled && not (System.String.IsNullOrWhiteSpace(envLang)) then
+                            let targetLang = envLang.Trim()
+                            let! mainTl =
+                                match tweet.text with
+                                | Some txt when not (System.String.IsNullOrWhiteSpace(txt)) ->
+                                    Translation.translateTextAsync txt targetLang
+                                | _ -> async { return None }
+                            let! qrtTl =
+                                match tweet.qrt with
+                                | Some qrt ->
+                                    match qrt.text with
+                                    | Some txt when not (System.String.IsNullOrWhiteSpace(txt)) ->
+                                        Translation.translateTextAsync txt targetLang
+                                    | _ -> async { return None }
+                                | None -> async { return None }
+                            
+                            let updatedQrt =
+                                tweet.qrt
+                                |> Option.map (fun qrt ->
+                                    match qrtTl with
+                                    | Some tl -> { qrt with translation = Some tl }
+                                    | None -> qrt
+                                )
+                            
+                            let updatedTweet =
+                                match mainTl with
+                                | Some tl -> { tweet with translation = Some tl; qrt = updatedQrt }
+                                | None -> { tweet with qrt = updatedQrt }
+                            return updatedTweet
+                        else
+                            return tweet
+                    }
+
                 let textToUse =
                     match tweet.translation with
                     | Some tl when not (System.String.IsNullOrWhiteSpace(tl.text)) ->
