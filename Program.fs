@@ -16,6 +16,7 @@ open Telebot.LoggingHandler
 open Telebot.Messages
 open Telebot.PrometheusMetrics
 open Telebot.TelemetryService
+open Telebot.Text
 open Prometheus
 open Suave
 open Suave.Filters
@@ -52,6 +53,35 @@ type HealthMonitoringService() =
                     do! Async.Sleep(5000) // Shorter retry interval on error
         } |> Async.StartAsTask :> Task
 
+let getChatOrUserName (chat: Funogram.Telegram.Types.Chat) (user: Funogram.Telegram.Types.User option) =
+    match chat.Title with
+    | Some title when not (System.String.IsNullOrWhiteSpace(title)) -> title
+    | _ ->
+        match user with
+        | Some u ->
+            match u.Username with
+            | Some username when not (System.String.IsNullOrWhiteSpace(username)) -> $"@{username}"
+            | _ ->
+                let first = u.FirstName
+                let last = defaultArg u.LastName ""
+                let full = $"{first} {last}".Trim()
+                if System.String.IsNullOrWhiteSpace(full) then $"User_{u.Id}" else full
+        | None ->
+            match chat.Username with
+            | Some username when not (System.String.IsNullOrWhiteSpace(username)) -> $"@{username}"
+            | _ ->
+                let first = defaultArg chat.FirstName ""
+                let last = defaultArg chat.LastName ""
+                let full = $"{first} {last}".Trim()
+                if System.String.IsNullOrWhiteSpace(full) then $"Chat_{chat.Id}" else full
+
+let hasSupportedLinks (text: string option) =
+    let ig = getLinks Telebot.Instagram.Instagram.postRegex text @ getLinks Telebot.Instagram.Instagram.shareRegex text
+    let tw = getLinks Telebot.Twitter.Twitter.twitterRegex text
+    let tt = getLinks Telebot.TikTok.TikTok.tikTokRegex text
+    let yt = getLinks Telebot.Youtube.Youtube.youtubeRegex text
+    not (List.isEmpty ig && List.isEmpty tw && List.isEmpty tt && List.isEmpty yt)
+
 // Enhanced update handler with telemetry
 let updateArrivedAsync (ctx: UpdateContext) : Async<unit> =
     async {
@@ -62,10 +92,14 @@ let updateArrivedAsync (ctx: UpdateContext) : Async<unit> =
                    Text = messageText
                    From = user
                } ->
+            let chatName = getChatOrUserName chat user
+            receivedMessagesCounter.WithLabels([|chatName|]).Inc()
+
             // Check blacklist
             let userId = user |> Option.map (fun u -> u.Id)
             if Telebot.Blacklist.isBlacklisted chat.Id userId then
                Log.Information($"Message ignored due to blacklist. ChatId: {chat.Id}, UserId: {userId}")
+               unprocessedMessagesCounter.WithLabels([|chatName|]).Inc()
                return ()
             else
 
@@ -88,6 +122,9 @@ let updateArrivedAsync (ctx: UpdateContext) : Async<unit> =
 
                     // Increment metrics
                     newMessageCounter.Inc()
+
+                    if not (hasSupportedLinks messageText) then
+                        unprocessedMessagesCounter.WithLabels([|chatName|]).Inc()
 
                     // Create message data
                     let mId = MessageId.Create messageId

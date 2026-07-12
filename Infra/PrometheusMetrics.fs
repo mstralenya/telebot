@@ -1,4 +1,4 @@
-﻿module Telebot.PrometheusMetrics
+module Telebot.PrometheusMetrics
 
 open Prometheus
 
@@ -25,6 +25,13 @@ let messageSuccessCounter =
 
 let messageFailureCounter =
     Metrics.CreateCounter("telebot_failures_total", "Number of failed message processing attempts")
+
+let receivedMessagesCounter =
+    Metrics.CreateCounter("telebot_received_messages_total", "Total number of messages received by the bot", [|"chat"|])
+
+let unprocessedMessagesCounter =
+    Metrics.CreateCounter("telebot_unprocessed_messages_total", "Number of messages read but not processed", [|"chat"|])
+
 
 // HTTP client metrics
 let httpRequestsTotal =
