@@ -28,10 +28,6 @@ module Reply =
     /// Creates a Message reply.
     let createMessage text = Message text
 
-    let createReplies replies = Replies replies
-
-    let createRichMessage html = RichMessage html
-
 let getLinks (regex: Regex) (text: string option) =
     text
     |> Option.map (fun text -> regex.Matches text |> Seq.cast<Match> |> Seq.map _.Value |> Seq.toList)
@@ -177,8 +173,8 @@ let private sendMediaGallery
 
     media |> Seq.map string |> Seq.iter deleteFile
 
-let rec reply (replyObj: Reply, messageId: MessageId, chatId: ChatId, ctx: UpdateContext) =
-    match replyObj with
+let reply (reply: Reply, messageId: MessageId, chatId: ChatId, ctx: UpdateContext) =
+    match reply with
     | VideoFile videoFile ->
         let videoPath = shrinkVideoIfNeeded videoFile.File
         let fileInfo = FileInfo videoPath
@@ -215,25 +211,6 @@ let rec reply (replyObj: Reply, messageId: MessageId, chatId: ChatId, ctx: Updat
                 message,
                 replyParameters = ReplyParameters.Create(messageId.MessageId, chatId),
                 parseMode = ParseMode.HTML
-            )
-
-        sendRequestAsync req ctx |> Async.Start
-
-    | Replies replies ->
-        replies |> List.iter (fun r -> reply (r, messageId, chatId, ctx))
-
-    | RichMessage html ->
-        let richMsg : InputRichMessage = {
-            Html = Some html
-            Markdown = None
-            IsRtl = None
-            SkipEntityDetection = None
-        }
-        let req =
-            Req.SendRichMessage.Make(
-                chatId,
-                richMsg,
-                replyParameters = ReplyParameters.Create(messageId.MessageId, chatId)
             )
 
         sendRequestAsync req ctx |> Async.Start
