@@ -136,15 +136,24 @@ let private recordHttpMetrics (method: string) (uri: Uri) (responseMessage: Http
 let private executeHttpRequestAsync (useProxy: bool) (request: HttpRequestMessage) : Async<HttpResponseMessage> =
     async {
         use client = getHttpClient useProxy
-        client.DefaultRequestHeaders.UserAgent.ParseAdd("Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:138.0) Gecko/20100101 Firefox/138.0")
-        client.DefaultRequestHeaders.Accept.ParseAdd("text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
-        client.DefaultRequestHeaders.AcceptLanguage.ParseAdd("en-US,en;q=0.5")
-        client.DefaultRequestHeaders.Add("Sec-Fetch-Dest", "document")
-        client.DefaultRequestHeaders.Add("Sec-Fetch-Mode", "navigate")
-        client.DefaultRequestHeaders.Add("Sec-Fetch-Site", "none")
-        client.DefaultRequestHeaders.Add("Sec-Fetch-User", "?1")
-        client.DefaultRequestHeaders.Add("Upgrade-Insecure-Requests", "1")
-        client.DefaultRequestHeaders.Add("DNT", "1")
+        if not (request.Headers.Contains("User-Agent")) then
+            request.Headers.UserAgent.ParseAdd("Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:138.0) Gecko/20100101 Firefox/138.0")
+        if not (request.Headers.Contains("Accept")) then
+            request.Headers.Accept.ParseAdd("text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
+        if not (request.Headers.Contains("Accept-Language")) then
+            request.Headers.AcceptLanguage.ParseAdd("en-US,en;q=0.5")
+        if not (request.Headers.Contains("Sec-Fetch-Dest")) then
+            request.Headers.Add("Sec-Fetch-Dest", "document")
+        if not (request.Headers.Contains("Sec-Fetch-Mode")) then
+            request.Headers.Add("Sec-Fetch-Mode", "navigate")
+        if not (request.Headers.Contains("Sec-Fetch-Site")) then
+            request.Headers.Add("Sec-Fetch-Site", "none")
+        if not (request.Headers.Contains("Sec-Fetch-User")) then
+            request.Headers.Add("Sec-Fetch-User", "?1")
+        if not (request.Headers.Contains("Upgrade-Insecure-Requests")) then
+            request.Headers.Add("Upgrade-Insecure-Requests", "1")
+        if not (request.Headers.Contains("DNT")) then
+            request.Headers.Add("DNT", "1")
         let stopwatch = Stopwatch.StartNew()
 
         try
