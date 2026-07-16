@@ -70,7 +70,7 @@ let initializeHttpClientFactory () =
     services
         .AddHttpClient("telebot")
         .AddPolicyHandler(combinedPolicy)
-        .ConfigureHttpClient(Action<HttpClient>(fun client -> client.Timeout <- TimeSpan.FromSeconds(30.0)))
+        .ConfigureHttpClient(Action<HttpClient>(fun client -> client.Timeout <- TimeSpan.FromSeconds(120.0)))
         .ConfigurePrimaryHttpMessageHandler(
             Func<HttpMessageHandler>(fun () -> 
                 let handler = new HttpClientHandler(CookieContainer = System.Net.CookieContainer())
@@ -81,7 +81,7 @@ let initializeHttpClientFactory () =
     services
         .AddHttpClient("telebot_proxied")
         .AddPolicyHandler(combinedPolicy)
-        .ConfigureHttpClient(Action<HttpClient>(fun client -> client.Timeout <- TimeSpan.FromSeconds(30.0)))
+        .ConfigureHttpClient(Action<HttpClient>(fun client -> client.Timeout <- TimeSpan.FromSeconds(120.0)))
         .ConfigurePrimaryHttpMessageHandler(
             Func<HttpMessageHandler>(fun () -> 
                 let handler = new HttpClientHandler(CookieContainer = System.Net.CookieContainer())
