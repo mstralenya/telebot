@@ -65,3 +65,9 @@ jobs:
           push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+
+      - name: Deploy to Host
+        if: ${{ github.event_name != 'pull_request' && github.ref == 'refs/heads/master' }}
+        run: |
+          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v /data/stacks/telebot:/stack docker:cli docker compose -f /stack/compose.yaml pull
+          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v /data/stacks/telebot:/stack docker:cli docker compose -f /stack/compose.yaml up -d
