@@ -1,0 +1,25 @@
+name: Deploy Telebot Stack
+
+on:
+  push:
+    branches:
+      - master
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Build Docker Image
+        run: |
+          docker build -t mstralenya/telebot:master .
+
+      - name: Sync Stack Configuration and Deploy
+        run: |
+          mkdir -p /data/stacks/telebot
+          cp deploy/compose.yaml /data/stacks/telebot/compose.yaml
+          cd /data/stacks/telebot
+          docker compose --env-file /data/stacks/telebot/.env up -d --force-recreate

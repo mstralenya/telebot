@@ -1,0 +1,49 @@
+services:
+  telebot:
+    depends_on:
+      - redis
+    image: mstralenya/telebot:master
+    container_name: telebot
+    restart: unless-stopped
+    network_mode: host
+    environment:
+      TWITTER_TRANSLATION_LANG: ${TWITTER_TRANSLATION_LANG}
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
+      BLACKLIST_CHAT_IDS: ${BLACKLIST_CHAT_IDS}
+      BLACKLIST_USER_IDS: ${BLACKLIST_USER_IDS}
+      LLM_API_TYPE: ${LLM_API_TYPE}
+      LLM_API_URL: ${LLM_API_URL}
+      LLM_MODEL: ${LLM_MODEL}
+      WEBAPP_BASE_URL: ${WEBAPP_BASE_URL}
+      SQLITE_DB_PATH: "/app/data/telebot.db"
+      REDIS_CONNECTION_STRING: "127.0.0.1:6379"
+      PROXY_URL: "http://127.0.0.1:8888"
+      USE_PROXY_FOR_INSTAGRAM_REELS: "true"
+      USE_PROXY_FOR_INSTAGRAM_POSTS: "false"             
+      USE_PROXY_FOR_TIKTOK: "false"
+      USE_PROXY_FOR_TWITTER: "false"
+      USE_PROXY_FOR_YOUTUBE: "false"   
+    volumes:
+      - telebot_data:/app/data
+
+  redis:
+    image: redis:7-alpine
+    container_name: telebot-redis
+    restart: unless-stopped
+    command: redis-server --appendonly yes
+    network_mode: host
+    volumes:
+      - redis_data:/data
+
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    container_name: telebot-cloudflared
+    restart: unless-stopped
+    command: tunnel --no-autoupdate run
+    environment:
+      TUNNEL_TOKEN: ${TUNNEL_TOKEN}
+    network_mode: host
+
+volumes:
+  telebot_data:
+  redis_data:
