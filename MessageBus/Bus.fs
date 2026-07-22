@@ -4,6 +4,7 @@ open System
 open Microsoft.Extensions.DependencyInjection
 open Microsoft.Extensions.Hosting
 open Microsoft.Extensions.Logging
+open System.Text.Json.Serialization
 open Wolverine
 open Wolverine.Redis
 open Serilog
@@ -30,11 +31,16 @@ let initializeBusAsync () : Async<unit> =
         | None ->
             let redisConn = getRedisConnectionString()
             Log.Information("Initializing message bus with persistent Redis transport ({RedisConn})...", redisConn)
-            
+
             let host =
                 Host
                     .CreateDefaultBuilder()
                     .UseWolverine(fun opts ->
+                        // Configure System.Text.Json serializer options for F# types (Discriminated Unions, Records, Options)
+                        opts.UseSystemTextJsonForSerialization(Action<System.Text.Json.JsonSerializerOptions>(fun jsonOpts ->
+                            jsonOpts.Converters.Add(JsonFSharpConverter())
+                        ))
+
                         // Configure Redis Transport for persistent message streams
                         opts.UseRedisTransport(redisConn).AutoProvision() |> ignore
                         opts.PublishAllMessages().ToRedisStream("telebot-messages") |> ignore
