@@ -83,7 +83,7 @@ module Twitter =
         | Some qrt -> tweet.media_extended @ qrt.media_extended // Concatenate the two lists if qrt is Some
         | None -> tweet.media_extended // If qrt is None, just return the main tweet's mediaURLs
 
-    let getTwitterReplyAsync (url: string) =
+    let getTwitterReplyAsync (chatId: ChatId) (url: string) =
         async {
             try
                 let! tweetOpt = getTweetFromUrlAsync url
@@ -193,10 +193,22 @@ module Twitter =
                             | ah, a, Some t, _ -> $"<b>{a}</b> <i>(@​{ah})</i>: <blockquote>{t}</blockquote>"
                             | ah, a, _, _ -> $"<b>{a}</b> <i>(@​{ah})</i>:"
 
+                        let isGroupChat =
+                            match chatId with
+                            | ChatId.Int id -> id < 0L
+                            | ChatId.String s -> s.StartsWith("-")
+
                         let cacheId = Translation.saveTranslationToCache originalText replyText.Value
-                        let btnPopup = InlineKeyboardButton.Create("Original (Popup)", callbackData = $"pop_orig:{cacheId}")
                         let btnToggle = InlineKeyboardButton.Create("Show Original Text", callbackData = $"show_orig:{cacheId}")
-                        let keyboard = InlineKeyboardMarkup.Create([| [| btnPopup; btnToggle |] |])
+                        
+                        let buttons =
+                            if isGroupChat then
+                                [| [| btnToggle |] |]
+                            else
+                                let btnPopup = InlineKeyboardButton.Create("Original (Popup)", callbackData = $"pop_orig:{cacheId}")
+                                [| [| btnPopup; btnToggle |] |]
+
+                        let keyboard = InlineKeyboardMarkup.Create(buttons)
                         let replyMarkup = Markup.InlineKeyboardMarkup keyboard
                         return Some (baseReply |> Reply.withMarkup replyMarkup)
                     else
@@ -207,8 +219,8 @@ module Twitter =
                 return None
         }
 
-    let getTwitterReply (url: string) =
-        getTwitterReplyAsync url |> Async.RunSynchronously
+    let getTwitterReply (chatId: ChatId) (url: string) =
+        getTwitterReplyAsync chatId url |> Async.RunSynchronously
 
     let getTwitterLinks (message: string option) = getLinks twitterRegex message
 
@@ -222,4 +234,4 @@ type TwitterLinksHandler() =
         this.extractTwitterLinks msg |> List.map (publishToBusAsync >> Async.RunSynchronously) |> ignore
 
     member this.Handle(msg: TwitterMessage) =
-        this.processLink msg Twitter.getTwitterReply
+        this.processLink msg (Twitter.getTwitterReply msg.OriginalMessage.ChatId)
