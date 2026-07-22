@@ -194,7 +194,13 @@ module Twitter =
                             | ah, a, _, _ -> $"<b>{a}</b> <i>(@​{ah})</i>:"
 
                         let cacheId = Translation.saveTranslationToCache originalText replyText.Value
-                        let btnPopup = InlineKeyboardButton.Create("Original (Popup)", callbackData = $"pop_orig:{cacheId}")
+                        let webAppBase = System.Environment.GetEnvironmentVariable("WEBAPP_BASE_URL")
+                        let btnPopup =
+                            if not (System.String.IsNullOrWhiteSpace(webAppBase)) then
+                                let url = $"{webAppBase.Trim().TrimEnd('/')}/webapp?id={cacheId}"
+                                InlineKeyboardButton.Create("Original (Web)", webApp = WebAppInfo.Create(url))
+                            else
+                                InlineKeyboardButton.Create("Original (Popup)", callbackData = $"pop_orig:{cacheId}")
                         let btnToggle = InlineKeyboardButton.Create("Show Original Text", callbackData = $"show_orig:{cacheId}")
                         let keyboard = InlineKeyboardMarkup.Create([| [| btnPopup; btnToggle |] |])
                         let replyMarkup = Markup.InlineKeyboardMarkup keyboard

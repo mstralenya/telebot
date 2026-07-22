@@ -202,7 +202,13 @@ let updateArrivedAsync (ctx: UpdateContext) : Async<unit> =
                         let newToggleLabel = if isOrig then "Show Translated Text" else "Show Original Text"
                         let newToggleData = if isOrig then $"show_trans:{cacheId}" else $"show_orig:{cacheId}"
                         
-                        let btnPopup = InlineKeyboardButton.Create("Original (Popup)", callbackData = $"pop_orig:{cacheId}")
+                        let webAppBase = System.Environment.GetEnvironmentVariable("WEBAPP_BASE_URL")
+                        let btnPopup =
+                            if not (System.String.IsNullOrWhiteSpace(webAppBase)) then
+                                let url = $"{webAppBase.Trim().TrimEnd('/')}/webapp?id={cacheId}"
+                                InlineKeyboardButton.Create("Original (Web)", webApp = WebAppInfo.Create(url))
+                            else
+                                InlineKeyboardButton.Create("Original (Popup)", callbackData = $"pop_orig:{cacheId}")
                         let btnToggle = InlineKeyboardButton.Create(newToggleLabel, callbackData = newToggleData)
                         let keyboard = InlineKeyboardMarkup.Create([| [| btnPopup; btnToggle |] |])
                         
@@ -265,13 +271,137 @@ let prometheusEndpoint =
 
     path "/metrics" >=> Writers.setMimeType "text/plain" >=> metricsAsync
 
-// Health check endpoint
+let generateWebAppHtml (contentHtml: string) =
+    $"""<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>Original Tweet Text</title>
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <style>
+        :root {{
+            --bg-color: var(--tg-theme-bg-color, #18181b);
+            --text-color: var(--tg-theme-text-color, #f4f4f5);
+            --hint-color: var(--tg-theme-hint-color, #a1a1aa);
+            --btn-color: var(--tg-theme-button-color, #3b82f6);
+            --btn-text: var(--tg-theme-button-text-color, #ffffff);
+            --card-bg: var(--tg-theme-secondary-bg-color, #27272a);
+        }}
+        body {{
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            margin: 0;
+            padding: 20px;
+            box-sizing: border-box;
+            display: flex;
+            flex-direction: column;
+            min-height: 100vh;
+        }}
+        .header {{
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 16px;
+            padding-bottom: 12px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+        }}
+        .title {{
+            font-size: 1.1rem;
+            font-weight: 600;
+            margin: 0;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }}
+        .badge {{
+            background: var(--btn-color);
+            color: var(--btn-text);
+            font-size: 0.75rem;
+            padding: 2px 8px;
+            border-radius: 12px;
+            font-weight: 500;
+        }}
+        .content {{
+            background: var(--card-bg);
+            border-radius: 16px;
+            padding: 16px;
+            line-height: 1.6;
+            font-size: 1rem;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
+            border: 1px solid rgba(255, 255, 255, 0.05);
+            word-break: break-word;
+            flex-grow: 1;
+        }}
+        blockquote {{
+            margin: 12px 0;
+            padding: 8px 12px;
+            border-left: 3px solid var(--btn-color);
+            background: rgba(255, 255, 255, 0.03);
+            border-radius: 0 8px 8px 0;
+        }}
+        a {{
+            color: var(--btn-color);
+            text-decoration: none;
+        }}
+        .close-btn {{
+            margin-top: 20px;
+            width: 100%%;
+            padding: 14px;
+            background-color: var(--btn-color);
+            color: var(--btn-text);
+            border: none;
+            border-radius: 12px;
+            font-size: 1rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: opacity 0.2s;
+        }}
+        .close-btn:active {{
+            opacity: 0.8;
+        }}
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1 class="title">Original Tweet <span class="badge">Original</span></h1>
+    </div>
+    <div class="content">
+        {contentHtml}
+    </div>
+    <button class="close-btn" onclick="Telegram.WebApp.close()">Close</button>
+    <script>
+        Telegram.WebApp.ready();
+        Telegram.WebApp.expand();
+    </script>
+</body>
+</html>"""
+
+let webAppHandler (ctx: HttpContext) =
+    async {
+        let cacheId = ctx.request.queryParam "id"
+        match cacheId with
+        | Choice1Of2 id ->
+            match Telebot.Translation.tryGetTranslationFromCache id with
+            | Some cached ->
+                let html = generateWebAppHtml cached.OriginalText
+                return! (OK html >=> Writers.setMimeType "text/html; charset=utf-8") ctx
+            | None ->
+                let html = generateWebAppHtml "<i>Original text not found or expired.</i>"
+                return! (OK html >=> Writers.setMimeType "text/html; charset=utf-8") ctx
+        | _ ->
+            let html = generateWebAppHtml "<i>Invalid request.</i>"
+            return! (OK html >=> Writers.setMimeType "text/html; charset=utf-8") ctx
+    }
+
+// Health check and WebApp endpoint
 let healthEndpoint =
     let healthCheckAsync (ctx: HttpContext) =
         async {
             try
                 let! httpHealthy = Telebot.HttpClient.healthCheckAsync()
-                let! busHealthy = healthCheckAsync()
+                let! busHealthy = Telebot.Bus.healthCheckAsync()
 
                 let overall = httpHealthy && busHealthy
                 let status = if overall then "healthy" else "unhealthy"
@@ -293,7 +423,10 @@ let healthEndpoint =
                 return! ServerErrors.INTERNAL_ERROR "Health check failed" ctx
         }
 
-    path "/health" >=> Writers.setMimeType "application/json" >=> healthCheckAsync
+    choose [
+        path "/health" >=> Writers.setMimeType "application/json" >=> healthCheckAsync
+        path "/webapp" >=> webAppHandler
+    ]
 
 // Start web server asynchronously
 let startWebServerAsync (port: int) (app: WebPart) : Async<unit> =
