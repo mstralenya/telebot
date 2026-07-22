@@ -1,5 +1,6 @@
 module Telebot.Twitter
 
+open Funogram.Telegram.Types
 open System.Linq
 open System.Net.Http.Json
 open System.Text.Json
@@ -168,9 +169,37 @@ module Twitter =
                     let! gallery = processUrlsAsync mediaUrls
 
                     twitterSuccessCounter.Inc()
-                    match gallery.Length with
-                    | i when i > 0 -> return Some(Reply.createGallery (List.toArray gallery) replyText)
-                    | _ -> return Some(Reply.createMessage replyText.Value)
+                    let baseReply =
+                        match gallery.Length with
+                        | i when i > 0 -> Reply.createGallery (List.toArray gallery) replyText
+                        | _ -> Reply.createMessage replyText.Value
+
+                    // Check if translation was actually applied to add a "Show Original Text" button
+                    let hasTranslation =
+                        (tweet.translation |> Option.bind (fun tl -> if System.String.IsNullOrWhiteSpace(tl.text) then None else Some tl) |> Option.isSome) ||
+                        (tweet.qrt |> Option.bind (fun q -> q.translation |> Option.bind (fun tl -> if System.String.IsNullOrWhiteSpace(tl.text) then None else Some tl)) |> Option.isSome)
+
+                    if hasTranslation && replyText.IsSome then
+                        let originalText =
+                            match tweet.user_screen_name, tweet.user_name, tweet.text, tweet.qrt with
+                            | ah, a, Some t, Some qrt ->
+                                match qrt.text with
+                                | Some qtxt ->
+                                    let qa = qrt.user_name
+                                    let qah = qrt.user_screen_name
+                                    $"""<b>{a}</b> <i>(@​{ah})</i>:<blockquote>{t}</blockquote>Quoting <b>{qa}</b><i>(@​{qah})</i>:<blockquote>{qtxt}</blockquote>"""
+                                | None ->
+                                    $"<b>{a}</b> <i>(@​{ah})</i>: <blockquote>{t}</blockquote>"
+                            | ah, a, Some t, _ -> $"<b>{a}</b> <i>(@​{ah})</i>: <blockquote>{t}</blockquote>"
+                            | ah, a, _, _ -> $"<b>{a}</b> <i>(@​{ah})</i>:"
+
+                        let cacheId = Translation.saveTranslationToCache originalText replyText.Value
+                        let btn = InlineKeyboardButton.Create("Show Original Text", callbackData = $"show_orig:{cacheId}")
+                        let keyboard = InlineKeyboardMarkup.Create([| [| btn |] |])
+                        let replyMarkup = Markup.InlineKeyboardMarkup keyboard
+                        return Some (baseReply |> Reply.withMarkup replyMarkup)
+                    else
+                        return Some baseReply
             with ex ->
                 Log.Error(ex, "Error processing Twitter link")
                 twitterFailureCounter.Inc()

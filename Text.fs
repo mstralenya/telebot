@@ -12,7 +12,7 @@ open Telebot.VideoDownloader
 
 module Reply =
     let createVideoFileWithCaption file caption =
-        VideoFile { File = file; Caption = caption }
+        VideoFile { File = file; Caption = caption; ReplyMarkup = None }
 
     let createVideoFile file = createVideoFileWithCaption file None
 
@@ -21,12 +21,20 @@ module Reply =
             {
                 Media = List.ofArray files
                 Caption = caption
+                ReplyMarkup = None
             }
 
     let createAudioFile audio = AudioFile audio
 
     /// Creates a Message reply.
-    let createMessage text = Message text
+    let createMessage text = Message (text, None)
+
+    let withMarkup (markup: Markup) (reply: Reply) =
+        match reply with
+        | VideoFile vf -> VideoFile { vf with ReplyMarkup = Some markup }
+        | Gallery g -> Gallery { g with ReplyMarkup = Some markup }
+        | Message (txt, _) -> Message (txt, Some markup)
+        | AudioFile af -> AudioFile af
 
 let getLinks (regex: Regex) (text: string option) =
     text
@@ -50,6 +58,7 @@ let sendRequestAsync (req: 'TReq) (ctx: UpdateContext) = req |> api ctx.Config |
 let private sendMediaWithCaption
     (fileToSend: string)
     (caption: string option)
+    (replyMarkup: Markup option)
     (messageId: MessageId)
     (chatId: ChatId)
     (ctx: UpdateContext)
@@ -60,7 +69,8 @@ let private sendMediaWithCaption
             InputFile.File(fileToSend, File.OpenRead fileToSend),
             parseMode = ParseMode.HTML,
             replyParameters = ReplyParameters.Create(messageId.MessageId, chatId),
-            ?caption = caption
+            ?caption = caption,
+            ?replyMarkup = replyMarkup
         )
 
     sendRequestAsync req ctx |> Async.RunSynchronously
@@ -76,6 +86,7 @@ let private getVideoInputFile (videoPath: string) =
 let private sendVideoWithThumbnail
     (videoPath: string)
     (caption: string option)
+    (replyMarkup: Markup option)
     (messageId: MessageId)
     (chatId: ChatId)
     (ctx: UpdateContext)
@@ -97,7 +108,8 @@ let private sendVideoWithThumbnail
             ?width = width,
             ?height = height,
             ?duration = duration,
-            ?caption = caption
+            ?caption = caption,
+            ?replyMarkup = replyMarkup
         )
 
     sendRequestAsync req ctx |> Async.RunSynchronously
@@ -143,6 +155,7 @@ let private getMediaSize (media: GalleryDisplay) =
 let private sendMediaGallery
     (media: GalleryDisplay list)
     (caption: string option)
+    (replyMarkup: Markup option)
     (messageId: MessageId)
     (chatId: ChatId)
     (ctx: UpdateContext)
@@ -179,7 +192,8 @@ let private sendMediaGallery
                     chatId,
                     msg,
                     replyParameters = ReplyParameters.Create(messageId.MessageId, chatId),
-                    parseMode = ParseMode.HTML
+                    parseMode = ParseMode.HTML,
+                    ?replyMarkup = replyMarkup
                 )
 
             sendRequestAsync req ctx)
@@ -257,7 +271,7 @@ let reply (reply: Reply, messageId: MessageId, chatId: ChatId, ctx: UpdateContex
             deleteFile videoPath
         else
             let caption = truncateWithEllipsis videoFile.Caption 1024
-            sendVideoWithThumbnail videoPath caption messageId chatId ctx
+            sendVideoWithThumbnail videoPath caption videoFile.ReplyMarkup messageId chatId ctx
 
     | AudioFile audioFile -> sendAudio audioFile messageId chatId ctx
 
@@ -273,17 +287,18 @@ let reply (reply: Reply, messageId: MessageId, chatId: ChatId, ctx: UpdateContex
         match processedMedia with
         | [ singleMedia ] ->
             match singleMedia with
-            | Photo p -> sendMediaWithCaption p caption messageId chatId ctx
-            | Video v -> sendVideoWithThumbnail v caption messageId chatId ctx
-        | media -> sendMediaGallery media caption messageId chatId ctx
+            | Photo p -> sendMediaWithCaption p caption imageGallery.ReplyMarkup messageId chatId ctx
+            | Video v -> sendVideoWithThumbnail v caption imageGallery.ReplyMarkup messageId chatId ctx
+        | media -> sendMediaGallery media caption imageGallery.ReplyMarkup messageId chatId ctx
 
-    | Message message ->
+    | Message (message, markup) ->
         let req =
             Req.SendMessage.Make(
                 chatId,
                 message,
                 replyParameters = ReplyParameters.Create(messageId.MessageId, chatId),
-                parseMode = ParseMode.HTML
+                parseMode = ParseMode.HTML,
+                ?replyMarkup = markup
             )
 
         sendRequestAsync req ctx |> Async.Start

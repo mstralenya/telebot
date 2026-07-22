@@ -102,13 +102,13 @@ let hasSupportedLinks (text: string option) =
 // Enhanced update handler with telemetry
 let updateArrivedAsync (ctx: UpdateContext) : Async<unit> =
     async {
-        match ctx.Update.Message with
+        match ctx.Update.Message, ctx.Update.CallbackQuery with
         | Some {
                    MessageId = messageId
                    Chat = chat
                    Text = messageText
                    From = user
-               } ->
+               }, _ ->
             let chatName = getChatOrUserName chat user
             let chatType = getChatType chat
             let senderName = getUserName user
@@ -162,6 +162,56 @@ let updateArrivedAsync (ctx: UpdateContext) : Async<unit> =
                     TelemetryScope.logInfo "Message processed and sent to bus successfully" scope
                 }
             )
+        | _, Some cb ->
+            try
+                match cb.Data with
+                | Some data when data.StartsWith("show_orig:") || data.StartsWith("show_trans:") ->
+                    let isOrig = data.StartsWith("show_orig:")
+                    let cacheId = if isOrig then data.Substring("show_orig:".Length) else data.Substring("show_trans:".Length)
+                    match Telebot.Translation.tryGetTranslationFromCache cacheId with
+                    | Some cached ->
+                        let newText = if isOrig then cached.OriginalText else cached.TranslatedText
+                        let newButtonLabel = if isOrig then "Show Translated Text" else "Show Original Text"
+                        let newCallbackData = if isOrig then $"show_trans:{cacheId}" else $"show_orig:{cacheId}"
+                        
+                        let btn = InlineKeyboardButton.Create(newButtonLabel, callbackData = newCallbackData)
+                        let keyboard = InlineKeyboardMarkup.Create([| [| btn |] |])
+                        
+                        let answerReq = Req.AnswerCallbackQuery.Make(cb.Id)
+                        do! answerReq |> api ctx.Config |> Async.Ignore
+                        
+                        match cb.Message with
+                        | Some (MaybeInaccessibleMessage.Message msg) ->
+                            let chatId = ChatId.Int msg.Chat.Id
+                            if msg.Text.IsSome then
+                                let editReq =
+                                    Req.EditMessageText.Make(
+                                        chatId = chatId,
+                                        messageId = msg.MessageId,
+                                        text = newText,
+                                        parseMode = ParseMode.HTML,
+                                        replyMarkup = keyboard
+                                    )
+                                do! editReq |> api ctx.Config |> Async.Ignore
+                            else
+                                let editReq =
+                                    Req.EditMessageCaption.Make(
+                                        chatId = chatId,
+                                        messageId = msg.MessageId,
+                                        caption = newText,
+                                        parseMode = ParseMode.HTML,
+                                        replyMarkup = keyboard
+                                    )
+                                do! editReq |> api ctx.Config |> Async.Ignore
+                        | _ -> ()
+                    | None ->
+                        let answerReq = Req.AnswerCallbackQuery.Make(cb.Id, text = "Translation not found or expired.", showAlert = true)
+                        do! answerReq |> api ctx.Config |> Async.Ignore
+                | _ ->
+                    let answerReq = Req.AnswerCallbackQuery.Make(cb.Id)
+                    do! answerReq |> api ctx.Config |> Async.Ignore
+            with ex ->
+                Log.Error(ex, "Error processing callback query")
         | _ ->
             return ()
     }
@@ -323,6 +373,9 @@ let mainAsync () : Async<int> =
                         let botToken = Environment.GetEnvironmentVariable "TELEGRAM_BOT_TOKEN"
                         if String.IsNullOrWhiteSpace botToken then
                             failwith "TELEGRAM_BOT_TOKEN environment variable is required but not set. Please set this environment variable before running the application."
+
+                        // Initialize SQLite translation database
+                        Telebot.Translation.initDb()
 
                         // Initialize metrics
                         initializeApplicationMetrics()

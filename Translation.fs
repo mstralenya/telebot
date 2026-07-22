@@ -4,6 +4,7 @@ open System
 open System.Net.Http
 open System.Text
 open System.Text.Json
+open Microsoft.Data.Sqlite
 open Serilog
 open Telebot.TwitterData
 
@@ -258,3 +259,71 @@ module Translation =
                     Log.Error(ex, "Error translating text via LLM")
                     return None
         }
+
+    type CachedTranslation = {
+        OriginalText: string
+        TranslatedText: string
+    }
+
+    let getSqliteDbPath () =
+        let path = Environment.GetEnvironmentVariable("SQLITE_DB_PATH")
+        if String.IsNullOrWhiteSpace(path) then "data/telebot.db" else path.Trim()
+
+    let initDb () =
+        let dbPath = getSqliteDbPath ()
+        let dir = System.IO.Path.GetDirectoryName(dbPath)
+        if not (String.IsNullOrWhiteSpace(dir)) && not (System.IO.Directory.Exists(dir)) then
+            System.IO.Directory.CreateDirectory(dir) |> ignore
+
+        let connectionString = sprintf "Data Source=%s" dbPath
+        use conn = new SqliteConnection(connectionString)
+        conn.Open()
+        use cmd = conn.CreateCommand()
+        cmd.CommandText <- """
+            CREATE TABLE IF NOT EXISTS translation_cache (
+                key TEXT PRIMARY KEY,
+                original_text TEXT NOT NULL,
+                translated_text TEXT NOT NULL,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            );
+        """
+        cmd.ExecuteNonQuery() |> ignore
+        Log.Information("SQLite translation cache database initialized at {DbPath}", dbPath)
+
+    let saveTranslationToCache (original: string) (translated: string) : string =
+        try
+            let key = Guid.NewGuid().ToString("N")
+            let dbPath = getSqliteDbPath ()
+            let connectionString = sprintf "Data Source=%s" dbPath
+            use conn = new SqliteConnection(connectionString)
+            conn.Open()
+            use cmd = conn.CreateCommand()
+            cmd.CommandText <- "INSERT INTO translation_cache (key, original_text, translated_text) VALUES (@key, @orig, @trans);"
+            cmd.Parameters.AddWithValue("@key", key) |> ignore
+            cmd.Parameters.AddWithValue("@orig", original) |> ignore
+            cmd.Parameters.AddWithValue("@trans", translated) |> ignore
+            cmd.ExecuteNonQuery() |> ignore
+            key
+        with ex ->
+            Log.Error(ex, "Error saving translation to SQLite cache")
+            Guid.NewGuid().ToString("N")
+
+    let tryGetTranslationFromCache (key: string) : CachedTranslation option =
+        try
+            let dbPath = getSqliteDbPath ()
+            let connectionString = sprintf "Data Source=%s" dbPath
+            use conn = new SqliteConnection(connectionString)
+            conn.Open()
+            use cmd = conn.CreateCommand()
+            cmd.CommandText <- "SELECT original_text, translated_text FROM translation_cache WHERE key = @key LIMIT 1;"
+            cmd.Parameters.AddWithValue("@key", key) |> ignore
+            use reader = cmd.ExecuteReader()
+            if reader.Read() then
+                let orig = reader.GetString(0)
+                let trans = reader.GetString(1)
+                Some { OriginalText = orig; TranslatedText = trans }
+            else
+                None
+        with ex ->
+            Log.Error(ex, "Error reading translation from SQLite cache key {Key}", key)
+            None

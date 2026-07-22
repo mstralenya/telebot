@@ -5,6 +5,7 @@ open Microsoft.Extensions.DependencyInjection
 open Microsoft.Extensions.Hosting
 open Microsoft.Extensions.Logging
 open Wolverine
+open Wolverine.Redis
 open Serilog
 open Telebot.PrometheusMetrics
 open Telebot.TelemetryService
@@ -13,36 +14,41 @@ open Telebot.TelemetryService
 let mutable private busHost: IHost option = None
 let private lockObj = obj()
 
+let getRedisConnectionString () =
+    let conn = Environment.GetEnvironmentVariable("REDIS_CONNECTION_STRING")
+    if String.IsNullOrWhiteSpace(conn) then
+        let url = Environment.GetEnvironmentVariable("REDIS_URL")
+        if String.IsNullOrWhiteSpace(url) then "127.0.0.1:6379" else url.Trim()
+    else
+        conn.Trim()
+
 // Initialize the bus asynchronously
 let initializeBusAsync () : Async<unit> =
     async {
         match busHost with
         | Some _ -> return ()
         | None ->
-            Log.Information("Initializing message bus...")
+            let redisConn = getRedisConnectionString()
+            Log.Information("Initializing message bus with persistent Redis transport ({RedisConn})...", redisConn)
             
             let host =
                 Host
                     .CreateDefaultBuilder()
                     .UseWolverine(fun opts ->
-                        // Configure local queue with better defaults
-                        opts
-                            .LocalQueue("telebot")
-                            .Sequential()
-                            .MaximumParallelMessages(Environment.ProcessorCount * 2)
-                            .TelemetryEnabled true
-                        |> ignore
+                        // Configure Redis Transport for persistent message streams
+                        opts.UseRedisTransport(redisConn).AutoProvision() |> ignore
+                        opts.PublishAllMessages().ToRedisStream("telebot-messages") |> ignore
+                        opts.ListenToRedisStream("telebot-messages", "telebot-consumer-group").Sequential() |> ignore
                         
                         // Configure logging and metrics
                         opts.Policies.LogMessageStarting(LogLevel.Information)
-                        opts.PublishAllMessages().ToLocalQueue "telebot" |> ignore
                     )
                     .Build()
 
             do! host.StartAsync() |> Async.AwaitTask
             busHost <- Some host
             
-            Log.Information("Message bus initialized successfully")
+            Log.Information("Message bus initialized successfully with Redis transport")
             initializeApplicationMetrics()
     }
 
