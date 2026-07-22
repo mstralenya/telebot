@@ -63,7 +63,14 @@ let createUpdateContext () : UpdateContext =
         Me = User.Create(0L, false, "bot")
     }
 
-let sendRequestAsync (req: 'TReq) (ctx: UpdateContext) = req |> api ctx.Config |> Async.Ignore
+let sendRequestAsync (req: 'TReq) (ctx: UpdateContext) =
+    async {
+        let! res = req |> api ctx.Config
+        match res with
+        | Ok _ -> ()
+        | Error err ->
+            Log.Error($"Telegram API request failed: {err.ErrorCode} - {err.Description}")
+    }
 
 
 let private sendMediaWithCaption
