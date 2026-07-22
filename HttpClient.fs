@@ -183,6 +183,18 @@ let private executeHttpRequestAsync (useProxy: bool) (request: HttpRequestMessag
             stopwatch.Stop()
     }
 
+let private normalizeUri (url: string) : Uri =
+    if String.IsNullOrWhiteSpace(url) then
+        Uri("https://localhost")
+    elif Uri.IsWellFormedUriString(url, UriKind.Absolute) then
+        Uri(url)
+    elif url.StartsWith("//") then
+        Uri($"https:{url}")
+    elif url.StartsWith("/") then
+        Uri($"https://www.instagram.com{url}")
+    else
+        try Uri(url, UriKind.Absolute) with _ -> Uri($"https://{url}")
+
 // GET request with telemetry
 let getAsync (url: string) (useProxy: bool) : Async<HttpResponseMessage> =
     withOperationTelemetry "http_get" (fun scope ->
@@ -191,7 +203,8 @@ let getAsync (url: string) (useProxy: bool) : Async<HttpResponseMessage> =
             TelemetryScope.addProperty "use_proxy" useProxy scope |> ignore
             TelemetryScope.logInfo $"Making GET request to {url} (useProxy={useProxy})" scope
 
-            use request = new HttpRequestMessage(HttpMethod.Get, url)
+            let uri = normalizeUri url
+            use request = new HttpRequestMessage(HttpMethod.Get, uri)
             let! response = executeHttpRequestAsync useProxy request
 
             if response.IsSuccessStatusCode then
@@ -211,7 +224,8 @@ let postAsync (url: string) (content: HttpContent) (useProxy: bool) : Async<Http
             TelemetryScope.addProperty "use_proxy" useProxy scope |> ignore
             TelemetryScope.logInfo $"Making POST request to {url} (useProxy={useProxy})" scope
 
-            use request = new HttpRequestMessage(HttpMethod.Post, url)
+            let uri = normalizeUri url
+            use request = new HttpRequestMessage(HttpMethod.Post, uri)
             request.Content <- content
             let! response = executeHttpRequestAsync useProxy request
 

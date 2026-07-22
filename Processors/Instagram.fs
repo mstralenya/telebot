@@ -82,13 +82,16 @@ module Instagram =
 
     let private getRealInstagramUrl (shareUrl: string) useProxy =
         async {
-            let! response = Telebot.HttpClient.getAsync shareUrl useProxy
+            try
+                let! response = Telebot.HttpClient.getAsync shareUrl useProxy
 
-            if response.IsSuccessStatusCode then
-                let realUrl = response.RequestMessage.RequestUri.ToString()
-                return realUrl
-            else
-                return "Failed to retrieve the real URL."
+                if response.IsSuccessStatusCode && response.RequestMessage.RequestUri <> null then
+                    let realUrl = response.RequestMessage.RequestUri.ToString()
+                    return realUrl
+                else
+                    return shareUrl
+            with _ ->
+                return shareUrl
         }
 
     let private getBaseUrlFromDash (manifest: string) (mimeTypePrefix: string) =
