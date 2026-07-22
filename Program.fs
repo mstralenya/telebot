@@ -185,10 +185,16 @@ let updateArrivedAsync (ctx: UpdateContext) : Async<unit> =
                     let cacheId = data.Substring("pop_orig:".Length)
                     match Telebot.Translation.tryGetTranslationFromCache cacheId with
                     | Some cached ->
-                        let plainText = stripHtml cached.OriginalText
-                        let popupText: string = if plainText.Length > 200 then plainText.Substring(0, 197) + "..." else plainText
-                        let answerReq = Req.AnswerCallbackQuery.Make(cb.Id, text = popupText, showAlert = true)
-                        do! answerReq |> api ctx.Config |> Async.Ignore
+                        let webAppBase = System.Environment.GetEnvironmentVariable("WEBAPP_BASE_URL")
+                        if not (System.String.IsNullOrWhiteSpace(webAppBase)) then
+                            let url = $"{webAppBase.Trim().TrimEnd('/')}/webapp?id={cacheId}"
+                            let answerReq = Req.AnswerCallbackQuery.Make(cb.Id, url = url)
+                            do! answerReq |> api ctx.Config |> Async.Ignore
+                        else
+                            let plainText = stripHtml cached.OriginalText
+                            let popupText: string = if plainText.Length > 200 then plainText.Substring(0, 197) + "..." else plainText
+                            let answerReq = Req.AnswerCallbackQuery.Make(cb.Id, text = popupText, showAlert = true)
+                            do! answerReq |> api ctx.Config |> Async.Ignore
                     | None ->
                         let answerReq = Req.AnswerCallbackQuery.Make(cb.Id, text = "Original text not found or expired.", showAlert = true)
                         do! answerReq |> api ctx.Config |> Async.Ignore
@@ -202,13 +208,7 @@ let updateArrivedAsync (ctx: UpdateContext) : Async<unit> =
                         let newToggleLabel = if isOrig then "Show Translated Text" else "Show Original Text"
                         let newToggleData = if isOrig then $"show_trans:{cacheId}" else $"show_orig:{cacheId}"
                         
-                        let webAppBase = System.Environment.GetEnvironmentVariable("WEBAPP_BASE_URL")
-                        let btnPopup =
-                            if not (System.String.IsNullOrWhiteSpace(webAppBase)) then
-                                let url = $"{webAppBase.Trim().TrimEnd('/')}/webapp?id={cacheId}"
-                                InlineKeyboardButton.Create("Original (Web)", webApp = WebAppInfo.Create(url))
-                            else
-                                InlineKeyboardButton.Create("Original (Popup)", callbackData = $"pop_orig:{cacheId}")
+                        let btnPopup = InlineKeyboardButton.Create("Original (Popup)", callbackData = $"pop_orig:{cacheId}")
                         let btnToggle = InlineKeyboardButton.Create(newToggleLabel, callbackData = newToggleData)
                         let keyboard = InlineKeyboardMarkup.Create([| [| btnPopup; btnToggle |] |])
                         
