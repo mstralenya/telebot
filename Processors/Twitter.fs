@@ -194,8 +194,9 @@ module Twitter =
                             | ah, a, _, _ -> $"<b>{a}</b> <i>(@​{ah})</i>:"
 
                         let cacheId = Translation.saveTranslationToCache originalText replyText.Value
-                        let btn = InlineKeyboardButton.Create("Show Original Text", callbackData = $"show_orig:{cacheId}")
-                        let keyboard = InlineKeyboardMarkup.Create([| [| btn |] |])
+                        let btnPopup = InlineKeyboardButton.Create("Original (Popup)", callbackData = $"pop_orig:{cacheId}")
+                        let btnToggle = InlineKeyboardButton.Create("Show Original Text", callbackData = $"show_orig:{cacheId}")
+                        let keyboard = InlineKeyboardMarkup.Create([| [| btnPopup; btnToggle |] |])
                         let replyMarkup = Markup.InlineKeyboardMarkup keyboard
                         return Some (baseReply |> Reply.withMarkup replyMarkup)
                     else

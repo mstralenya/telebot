@@ -92,6 +92,24 @@ let getUserName (user: Funogram.Telegram.Types.User option) =
             if System.String.IsNullOrWhiteSpace(full) then $"User_{u.Id}" else full
     | None -> "Unknown"
 
+let stripHtml (html: string) : string =
+    if System.String.IsNullOrWhiteSpace(html) then ""
+    else
+        html
+            .Replace("<br>", "\n")
+            .Replace("<br/>", "\n")
+            .Replace("<br />", "\n")
+            .Replace("<blockquote>", "\n“")
+            .Replace("</blockquote>", "”\n")
+            .Replace("<b>", "")
+            .Replace("</b>", "")
+            .Replace("<i>", "")
+            .Replace("</i>", "")
+            .Replace("&lt;", "<")
+            .Replace("&gt;", ">")
+            .Replace("&amp;", "&")
+            .Trim()
+
 let hasSupportedLinks (text: string option) =
     let ig = getLinks Telebot.Instagram.Instagram.postRegex text @ getLinks Telebot.Instagram.Instagram.shareRegex text
     let tw = getLinks Telebot.Twitter.Twitter.twitterRegex text
@@ -120,7 +138,6 @@ let updateArrivedAsync (ctx: UpdateContext) : Async<unit> =
                Log.Information($"Message ignored due to blacklist. ChatId: {chat.Id}, UserId: {userId}")
                unprocessedMessagesCounter.WithLabels([|chatName; chatType; senderName|]).Inc()
                return ()
-            else
 
             // Create telemetry context
             let chatIdStr = chat.Id.ToString()
@@ -164,17 +181,30 @@ let updateArrivedAsync (ctx: UpdateContext) : Async<unit> =
         | _, Some cb ->
             try
                 match cb.Data with
+                | Some data when data.StartsWith("pop_orig:") ->
+                    let cacheId = data.Substring("pop_orig:".Length)
+                    match Telebot.Translation.tryGetTranslationFromCache cacheId with
+                    | Some cached ->
+                        let plainText = stripHtml cached.OriginalText
+                        let popupText: string = if plainText.Length > 200 then plainText.Substring(0, 197) + "..." else plainText
+                        let answerReq = Req.AnswerCallbackQuery.Make(cb.Id, text = popupText, showAlert = true)
+                        do! answerReq |> api ctx.Config |> Async.Ignore
+                    | None ->
+                        let answerReq = Req.AnswerCallbackQuery.Make(cb.Id, text = "Original text not found or expired.", showAlert = true)
+                        do! answerReq |> api ctx.Config |> Async.Ignore
+
                 | Some data when data.StartsWith("show_orig:") || data.StartsWith("show_trans:") ->
                     let isOrig = data.StartsWith("show_orig:")
                     let cacheId = if isOrig then data.Substring("show_orig:".Length) else data.Substring("show_trans:".Length)
                     match Telebot.Translation.tryGetTranslationFromCache cacheId with
                     | Some cached ->
                         let newText = if isOrig then cached.OriginalText else cached.TranslatedText
-                        let newButtonLabel = if isOrig then "Show Translated Text" else "Show Original Text"
-                        let newCallbackData = if isOrig then $"show_trans:{cacheId}" else $"show_orig:{cacheId}"
+                        let newToggleLabel = if isOrig then "Show Translated Text" else "Show Original Text"
+                        let newToggleData = if isOrig then $"show_trans:{cacheId}" else $"show_orig:{cacheId}"
                         
-                        let btn = InlineKeyboardButton.Create(newButtonLabel, callbackData = newCallbackData)
-                        let keyboard = InlineKeyboardMarkup.Create([| [| btn |] |])
+                        let btnPopup = InlineKeyboardButton.Create("Original (Popup)", callbackData = $"pop_orig:{cacheId}")
+                        let btnToggle = InlineKeyboardButton.Create(newToggleLabel, callbackData = newToggleData)
+                        let keyboard = InlineKeyboardMarkup.Create([| [| btnPopup; btnToggle |] |])
                         
                         let answerReq = Req.AnswerCallbackQuery.Make(cb.Id)
                         do! answerReq |> api ctx.Config |> Async.Ignore
