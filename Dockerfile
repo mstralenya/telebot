@@ -1,6 +1,7 @@
-﻿FROM mcr.microsoft.com/dotnet/aspnet:10.0-alpine AS base
+FROM mcr.microsoft.com/dotnet/aspnet:10.0-alpine AS base
 # Install FFmpeg and yt-dlp using apk
 RUN apk add --no-cache ffmpeg yt-dlp deno
+RUN mkdir -p /app/data && chown -R $APP_UID /app/data
 USER $APP_UID
 WORKDIR /app
 
