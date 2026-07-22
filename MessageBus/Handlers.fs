@@ -72,11 +72,12 @@ type ResultHandler =
             // Log and record metrics
             processingTimeSummary.Observe msg.ElapsedMs
 
+            let ctx = Text.createUpdateContext()
             if msg.Success then
                 Log.Debug $"Successfully processed link: {msg.Link.Url}"
                 // Send the reply if successful and there is one
                 match msg.Reply with
-                | Some r -> reply (r, msg.Link.OriginalMessage.MessageId, msg.Link.OriginalMessage.ChatId, msg.Link.OriginalMessage.Context)
+                | Some r -> reply (r, msg.Link.OriginalMessage.MessageId, msg.Link.OriginalMessage.ChatId, ctx)
                 | None -> ()
             else
                 Log.Error $"Failed to process link: {msg.Link.Url}"
@@ -90,6 +91,6 @@ type ResultHandler =
                         parseMode = ParseMode.HTML
                     )
 
-                sendRequestAsync message msg.Link.OriginalMessage.Context
+                sendRequestAsync message ctx
                 |> Async.RunSynchronously
         }

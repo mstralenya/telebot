@@ -11,7 +11,6 @@ type UpdateMessage =
         MessageText: string option
         MessageId: MessageId
         ChatId: ChatId
-        Context: UpdateContext
     }
 
 

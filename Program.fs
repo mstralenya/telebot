@@ -153,7 +153,6 @@ let updateArrivedAsync (ctx: UpdateContext) : Async<unit> =
                         MessageText = messageText
                         MessageId = mId
                         ChatId = cId
-                        Context = ctx
                     }
 
                     // Send to bus asynchronously

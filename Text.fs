@@ -1,5 +1,6 @@
 module Telebot.Text
 
+open System
 open System.Text.RegularExpressions
 open System.IO
 open Funogram.Api
@@ -51,6 +52,16 @@ let truncateWithEllipsis (input: string option) (maxLength: int) : string option
             Some(truncated + "...")
     | None -> None
 
+
+let createUpdateContext () : UpdateContext =
+    let config =
+        Config.defaultConfig
+        |> Config.withReadTokenFromEnv "TELEGRAM_BOT_TOKEN"
+    {
+        Update = Update.Create(0L)
+        Config = config
+        Me = User.Create(0L, false, "bot")
+    }
 
 let sendRequestAsync (req: 'TReq) (ctx: UpdateContext) = req |> api ctx.Config |> Async.Ignore
 
