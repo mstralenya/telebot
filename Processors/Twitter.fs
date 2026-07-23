@@ -205,7 +205,13 @@ module Twitter =
                             if isGroupChat then
                                 [| [| btnToggle |] |]
                             else
-                                let btnPopup = InlineKeyboardButton.Create("Original (Popup)", callbackData = $"pop_orig:{cacheId}")
+                                let webAppBase = System.Environment.GetEnvironmentVariable("WEBAPP_BASE_URL")
+                                let btnPopup =
+                                    if not (System.String.IsNullOrWhiteSpace(webAppBase)) then
+                                        let url = $"{webAppBase.Trim().TrimEnd('/')}/webapp?id={cacheId}"
+                                        InlineKeyboardButton.Create("Original (Web)", webApp = WebAppInfo.Create(url))
+                                    else
+                                        InlineKeyboardButton.Create("Original (Popup)", callbackData = $"pop_orig:{cacheId}")
                                 [| [| btnPopup; btnToggle |] |]
 
                         let keyboard = InlineKeyboardMarkup.Create(buttons)

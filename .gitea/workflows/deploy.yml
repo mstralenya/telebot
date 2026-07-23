@@ -21,5 +21,8 @@ jobs:
         run: |
           mkdir -p /data/stacks/telebot
           cp deploy/compose.yaml /data/stacks/telebot/compose.yaml
+          touch /data/stacks/telebot/.env
+          grep -q "^WEBAPP_BASE_URL=" /data/stacks/telebot/.env || echo "WEBAPP_BASE_URL=https://telebot.foobar.cfd" >> /data/stacks/telebot/.env
+          sed -i 's|^WEBAPP_BASE_URL=.*|WEBAPP_BASE_URL=https://telebot.foobar.cfd|' /data/stacks/telebot/.env
           cd /data/stacks/telebot
           docker compose --env-file /data/stacks/telebot/.env up -d --force-recreate

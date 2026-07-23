@@ -185,16 +185,10 @@ let updateArrivedAsync (ctx: UpdateContext) : Async<unit> =
                     let cacheId = data.Substring("pop_orig:".Length)
                     match Telebot.Translation.tryGetTranslationFromCache cacheId with
                     | Some cached ->
-                        let webAppBase = System.Environment.GetEnvironmentVariable("WEBAPP_BASE_URL")
-                        if not (System.String.IsNullOrWhiteSpace(webAppBase)) then
-                            let url = $"{webAppBase.Trim().TrimEnd('/')}/webapp?id={cacheId}"
-                            let answerReq = Req.AnswerCallbackQuery.Make(cb.Id, url = url)
-                            do! answerReq |> api ctx.Config |> Async.Ignore
-                        else
-                            let plainText = stripHtml cached.OriginalText
-                            let popupText: string = if plainText.Length > 200 then plainText.Substring(0, 197) + "..." else plainText
-                            let answerReq = Req.AnswerCallbackQuery.Make(cb.Id, text = popupText, showAlert = true)
-                            do! answerReq |> api ctx.Config |> Async.Ignore
+                        let plainText = stripHtml cached.OriginalText
+                        let popupText: string = if plainText.Length > 200 then plainText.Substring(0, 197) + "..." else plainText
+                        let answerReq = Req.AnswerCallbackQuery.Make(cb.Id, text = popupText, showAlert = true)
+                        do! answerReq |> api ctx.Config |> Async.Ignore
                     | None ->
                         let answerReq = Req.AnswerCallbackQuery.Make(cb.Id, text = "Original text not found or expired.", showAlert = true)
                         do! answerReq |> api ctx.Config |> Async.Ignore
