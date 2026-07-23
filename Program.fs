@@ -202,9 +202,25 @@ let updateArrivedAsync (ctx: UpdateContext) : Async<unit> =
                         let newToggleLabel = if isOrig then "Show Translated Text" else "Show Original Text"
                         let newToggleData = if isOrig then $"show_trans:{cacheId}" else $"show_orig:{cacheId}"
                         
-                        let btnPopup = InlineKeyboardButton.Create("Original (Popup)", callbackData = $"pop_orig:{cacheId}")
                         let btnToggle = InlineKeyboardButton.Create(newToggleLabel, callbackData = newToggleData)
-                        let keyboard = InlineKeyboardMarkup.Create([| [| btnPopup; btnToggle |] |])
+                        let isGroupChat =
+                            match cb.Message with
+                            | Some (MaybeInaccessibleMessage.Message msg) -> msg.Chat.Id < 0L
+                            | _ -> false
+
+                        let buttons =
+                            if not isGroupChat then
+                                let webAppBase = System.Environment.GetEnvironmentVariable("WEBAPP_BASE_URL")
+                                if not (System.String.IsNullOrWhiteSpace(webAppBase)) then
+                                    let url = $"{webAppBase.Trim().TrimEnd('/')}/webapp?id={cacheId}"
+                                    let btnWebApp = InlineKeyboardButton.Create("Original (Web)", webApp = WebAppInfo.Create(url))
+                                    [| [| btnWebApp; btnToggle |] |]
+                                else
+                                    [| [| btnToggle |] |]
+                            else
+                                [| [| btnToggle |] |]
+
+                        let keyboard = InlineKeyboardMarkup.Create(buttons)
                         
                         let answerReq = Req.AnswerCallbackQuery.Make(cb.Id)
                         do! answerReq |> api ctx.Config |> Async.Ignore

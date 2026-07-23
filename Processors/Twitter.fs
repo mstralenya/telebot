@@ -202,17 +202,16 @@ module Twitter =
                         let btnToggle = InlineKeyboardButton.Create("Show Original Text", callbackData = $"show_orig:{cacheId}")
                         
                         let buttons =
-                            if isGroupChat then
-                                [| [| btnToggle |] |]
-                            else
+                            if not isGroupChat then
                                 let webAppBase = System.Environment.GetEnvironmentVariable("WEBAPP_BASE_URL")
-                                let btnPopup =
-                                    if not (System.String.IsNullOrWhiteSpace(webAppBase)) then
-                                        let url = $"{webAppBase.Trim().TrimEnd('/')}/webapp?id={cacheId}"
-                                        InlineKeyboardButton.Create("Original (Web)", webApp = WebAppInfo.Create(url))
-                                    else
-                                        InlineKeyboardButton.Create("Original (Popup)", callbackData = $"pop_orig:{cacheId}")
-                                [| [| btnPopup; btnToggle |] |]
+                                if not (System.String.IsNullOrWhiteSpace(webAppBase)) then
+                                    let url = $"{webAppBase.Trim().TrimEnd('/')}/webapp?id={cacheId}"
+                                    let btnWebApp = InlineKeyboardButton.Create("Original (Web)", webApp = WebAppInfo.Create(url))
+                                    [| [| btnWebApp; btnToggle |] |]
+                                else
+                                    [| [| btnToggle |] |]
+                            else
+                                [| [| btnToggle |] |]
 
                         let keyboard = InlineKeyboardMarkup.Create(buttons)
                         let replyMarkup = Markup.InlineKeyboardMarkup keyboard
