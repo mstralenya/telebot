@@ -260,3 +260,4 @@ MyProject_coverage.xml
 #Project-specific
 token
 .env
+.aider*
