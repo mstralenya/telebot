@@ -307,8 +307,8 @@ module Youtube =
         let isMp4 f = f.ext |> Option.exists (fun e -> e.Equals("mp4", StringComparison.OrdinalIgnoreCase) || e.Equals("m4v", StringComparison.OrdinalIgnoreCase))
         let score f =
             let res = defaultArg f.height 0 * 10000 + defaultArg f.width 0
-            let codecBonus = if isAvc1 f then 1_000_000 else 0
-            let extBonus = if isMp4 f then 100_000 else 0
+            let codecBonus = if isAvc1 f then 100_000_000 else 0
+            let extBonus = if isMp4 f then 10_000_000 else 0
             res + codecBonus + extBonus
         // Order videos by preference
         let orderedVideos = videos |> Array.sortByDescending score
