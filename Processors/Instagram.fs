@@ -9,14 +9,16 @@ open System.Text.RegularExpressions
 open System.Collections.Generic
 open System.Threading
 open System.Xml.Linq
+open System.Threading.Tasks
 open Serilog
 open Telebot.DataTypes
 open Telebot.Bus
 open Telebot.Handlers
 open Telebot.InstagramData
+open Telebot.Ffmpeg
 open Telebot.Messages
 open Telebot.PrometheusMetrics
-open Telebot.Text
+open Telebot.Replies
 open Telebot.VideoDownloader
 open Wolverine.Attributes
 
@@ -69,7 +71,9 @@ module Instagram =
             let! response = Telebot.HttpClient.executeRequestAsync request useProxy
             let cancellationToken = CancellationToken.None
             let! body = response.Content.ReadAsStringAsync cancellationToken |> Async.AwaitTask
-            Log.Information $"fetched instagram data:\n {response.StatusCode} \n {body}"
+            let status = response.StatusCode
+            response.Dispose()
+            Log.Information $"fetched instagram data:\n {status} \n {body}"
             return JsonSerializer.Deserialize<InstagramMediaResponse>(body)
         }
 
@@ -84,10 +88,10 @@ module Instagram =
         async {
             try
                 let! response = Telebot.HttpClient.getAsync shareUrl useProxy
+                use _ = response
 
                 if response.IsSuccessStatusCode && response.RequestMessage.RequestUri <> null then
-                    let realUrl = response.RequestMessage.RequestUri.ToString()
-                    return realUrl
+                    return response.RequestMessage.RequestUri.ToString()
                 else
                     return shareUrl
             with _ ->
@@ -105,8 +109,8 @@ module Instagram =
                     e.Attribute(XName.Get("mimeType")) <> null && 
                     e.Attribute(XName.Get("mimeType")).Value.StartsWith(mimeTypePrefix))
                 |> Option.bind (fun e -> e.Descendants() |> Seq.tryFind (fun d -> d.Name.LocalName = "BaseURL"))
-                |> Option.map (fun e -> e.Value)
-            
+                |> Option.map _.Value
+
             match repUrl with
             | Some url -> Some url
             | None ->
@@ -119,49 +123,58 @@ module Instagram =
                     )
                 )
                 |> Option.bind (fun e -> e.Descendants() |> Seq.tryFind (fun d -> d.Name.LocalName = "BaseURL"))
-                |> Option.map (fun e -> e.Value)
+                |> Option.map _.Value
         with
         | _ -> None
 
+    // Resolves an audio stream url from a node's DASH manifest or licensed music metadata
+    let private findAudioUrl (dashInfo: InstagramDashInfo option) (clipsMetadata: InstagramClipsMetadata option) =
+        dashInfo
+        |> Option.bind _.VideoDashManifest
+        |> Option.bind (fun manifest -> getBaseUrlFromDash manifest "audio")
+        |> Option.orElseWith (fun () ->
+            clipsMetadata
+            |> Option.bind _.MusicInfo
+            |> Option.bind _.MusicAssetInfo
+            |> Option.bind _.ProgressiveDownloadUrl)
+
     let private tryGetMediaUrlViaProxy (shortcode: string) (isVideo: bool) (useProxy: bool) : Async<string option> =
-        async {
-            let proxies = [
-                "https://fxig.seria.moe"
-                "https://eeinstagram.com"
-                "https://instagramez.com"
-            ]
+        let pattern =
+            if isVideo then
+                """<meta\s+property=["']og:video["']\s+content=["'](.*?)["']"""
+            else
+                """<meta\s+property=["']og:image["']\s+content=["'](.*?)["']"""
 
-            let mutable result = None
-            let mutable i = 0
+        let proxies = [
+            "https://fxig.seria.moe"
+            "https://eeinstagram.com"
+            "https://instagramez.com"
+        ]
 
-            while result.IsNone && i < proxies.Length do
-                let proxyBase = proxies.[i]
-                let url = $"{proxyBase}/reel/{shortcode}/"
-                
+        let rec tryProxies remaining =
+            async {
+                match remaining with
+                | [] -> return None
+                | proxyBase :: rest ->
                 try
-                    let request = new HttpRequestMessage(HttpMethod.Get, url)
+                    use request = new HttpRequestMessage(HttpMethod.Get, $"{proxyBase}/reel/{shortcode}/")
                     request.Headers.TryAddWithoutValidation("User-Agent", "TelegramBot (like TwitterBot)") |> ignore
-                    
+
                     let! response = Telebot.HttpClient.executeRequestAsync request useProxy
+                    use _ = response
                     if response.IsSuccessStatusCode then
-                        let! html = response.Content.ReadAsStringAsync() |> Async.AwaitTask
-                        
-                        let pattern = 
-                            if isVideo then
-                                """<meta\s+property=["']og:video["']\s+content=["'](.*?)["']"""
-                            else
-                                """<meta\s+property=["']og:image["']\s+content=["'](.*?)["']"""
-                        
-                        let m = Regex.Match(html, pattern)
-                        if m.Success then
-                            result <- Some (m.Groups.[1].Value)
-                with ex ->
-                    Log.Error(ex, $"Error requesting from proxy {proxyBase}")
+                            let! html = response.Content.ReadAsStringAsync() |> Async.AwaitTask
+                            match Regex.Match(html, pattern) with
+                            | m when m.Success -> return Some m.Groups.[1].Value
+                            | _ -> return! tryProxies rest
+                        else
+                            return! tryProxies rest
+                    with ex ->
+                        Log.Error(ex, $"Error requesting from proxy {proxyBase}")
+                        return! tryProxies rest
+            }
 
-                i <- i + 1
-
-            return result
-        }
+        tryProxies proxies
 
     let private tryDownloadMediaViaProxy (shortcode: string) (isVideo: bool) (useProxy: bool) : Async<GalleryDisplay option> =
         async {
@@ -180,15 +193,7 @@ module Instagram =
 
             match media.Data |> Option.bind _.InstagramXdt with
             | Some xdt ->
-                let audioUrl =
-                    xdt.DashInfo
-                    |> Option.bind _.VideoDashManifest
-                    |> Option.bind (fun m -> getBaseUrlFromDash m "audio")
-                    |> Option.orElseWith (fun () ->
-                        xdt.ClipsMetadata
-                        |> Option.bind _.MusicInfo
-                        |> Option.bind _.MusicAssetInfo
-                        |> Option.bind _.ProgressiveDownloadUrl)
+                let audioUrl = findAudioUrl xdt.DashInfo xdt.ClipsMetadata
 
                 if audioUrl.IsSome then
                     Log.Information $"Found DASH or licensed audio stream for reel {rId}"
@@ -211,7 +216,7 @@ module Instagram =
             let useProxy = Telebot.HttpClient.ProxyConfig.useProxyForInstagramPosts()
             let! media = fetchMediaData pId useProxy
 
-            match media.Data |> Option.bind (fun d -> d.InstagramXdt) with
+            match media.Data |> Option.bind _.InstagramXdt with
             | Some xdt ->
                 let! mediaItems =
                     match xdt.EdgeSidecarToChildren with
@@ -224,17 +229,9 @@ module Instagram =
                                 else
                                     e.Node.DisplayUrl
                             
-                            let audioUrl = 
+                            let audioUrl =
                                 if e.Node.IsVideo then
-                                    let url = 
-                                        e.Node.DashInfo
-                                        |> Option.bind _.VideoDashManifest
-                                        |> Option.bind (fun m -> getBaseUrlFromDash m "audio")
-                                        |> Option.orElseWith (fun () ->
-                                            e.Node.ClipsMetadata
-                                            |> Option.bind _.MusicInfo
-                                            |> Option.bind _.MusicAssetInfo
-                                            |> Option.bind _.ProgressiveDownloadUrl)
+                                    let url = findAudioUrl e.Node.DashInfo e.Node.ClipsMetadata
                                     if url.IsSome then Log.Information $"Found DASH or licensed audio stream for sidecar item in post {pId}"
                                     url
                                 else None
@@ -244,17 +241,9 @@ module Instagram =
                     | _ ->
                         let url = if xdt.IsVideo then xdt.VideoUrl else xdt.ImageUrl
                         
-                        let audioUrl = 
+                        let audioUrl =
                             if xdt.IsVideo then
-                                let aUrl =
-                                    xdt.DashInfo
-                                    |> Option.bind _.VideoDashManifest
-                                    |> Option.bind (fun m -> getBaseUrlFromDash m "audio")
-                                    |> Option.orElseWith (fun () ->
-                                        xdt.ClipsMetadata
-                                        |> Option.bind _.MusicInfo
-                                        |> Option.bind _.MusicAssetInfo
-                                        |> Option.bind _.ProgressiveDownloadUrl)
+                                let aUrl = findAudioUrl xdt.DashInfo xdt.ClipsMetadata
                                 if aUrl.IsSome then Log.Information $"Found DASH or licensed audio stream for post {pId}"
                                 aUrl
                             else None
@@ -309,9 +298,6 @@ module Instagram =
                 return Some(Reply.createMessage msg)
         }
 
-    let getInstagramReplySync url =
-        getInstagramReply url |> Async.RunSynchronously
-
     let getInstagramShareReplyAsync (url: string) =
         async {
             let useProxy =
@@ -320,12 +306,6 @@ module Instagram =
             let! realUrl = getRealInstagramUrl url useProxy
             return! getInstagramReply realUrl
         }
-
-    let getInstagramShareReply url =
-        getInstagramShareReplyAsync url |> Async.RunSynchronously
-
-    let getInstagramShareReplySync url =
-        getInstagramShareReply url
 
     // Audio extraction: download video then extract audio via ffmpeg
     let private extractAudioFromVideoAsync (videoUrl: string) (id: string option) useProxy =
@@ -337,28 +317,19 @@ module Instagram =
                 do! downloadFileAsync videoUrl outVideo useProxy
                 let outAudio = Path.ChangeExtension(outVideo, ".mp3")
 
-                let psi = ProcessStartInfo()
-                psi.FileName <- "ffmpeg"
-                psi.Arguments <- $"-y -i \"{outVideo}\" -vn -acodec libmp3lame -q:a 2 \"{outAudio}\""
-                psi.UseShellExecute <- false
-                psi.RedirectStandardOutput <- true
-                psi.RedirectStandardError <- true
-                psi.CreateNoWindow <- true
+                let args = sprintf "-y -i \"%s\" -vn -acodec libmp3lame -q:a 2 \"%s\"" outVideo outAudio
 
-                use p = new Process()
-                p.StartInfo <- psi
-                let started = p.Start()
-                if not started then
-                    try deleteFile outVideo with _ -> ()
-                    return Choice2Of2 "Failed to start ffmpeg"
-                else
-                    p.WaitForExit()
-                    if p.ExitCode = 0 && File.Exists outAudio then
-                        try deleteFile outVideo with _ -> ()
+                match! runProcessCaptureAsync "ffmpeg" args ffmpegTimeoutMs with
+                | Error msg ->
+                    do! deleteFileAsync outVideo |> Async.Catch |> Async.Ignore
+                    return Choice2Of2 msg
+                | Ok (exitCode, _, _) ->
+                    if exitCode = 0 && File.Exists outAudio then
+                        do! deleteFileAsync outVideo |> Async.Catch |> Async.Ignore
                         return Choice1Of2 outAudio
                     else
-                        try deleteFile outVideo with _ -> ()
-                        try deleteFile outAudio with _ -> ()
+                        do! deleteFileAsync outVideo |> Async.Catch |> Async.Ignore
+                        do! deleteFileAsync outAudio |> Async.Catch |> Async.Ignore
                         return Choice2Of2 "ffmpeg failed to extract audio"
             with ex ->
                 return Choice2Of2 ex.Message
@@ -389,7 +360,7 @@ module Instagram =
                     let! media = fetchMediaData id useProxy
                     let! videoUrlOpt =
                         async {
-                            match media.Data |> Option.bind (fun d -> d.InstagramXdt) with
+                            match media.Data |> Option.bind _.InstagramXdt with
                             | Some xdt when xdt.IsVideo -> return xdt.VideoUrl
                             | _ -> return! tryGetMediaUrlViaProxy id true useProxy
                         }
@@ -403,9 +374,6 @@ module Instagram =
                 | _ -> return Some (Reply.createMessage "Invalid Instagram URL for audio extraction")
             with ex -> return Some (Reply.createMessage ex.Message)
         }
-
-    let getInstagramAudioReply url =
-        getInstagramAudioReplyAsync url |> Async.RunSynchronously
 
 
 type InstagramLinksHandler() =
@@ -429,18 +397,30 @@ type InstagramLinksHandler() =
     member private this.extractInstagramVideoLinks =
         createLinkExtractor this.getInstagramVideoLinks InstagramMessage
     [<WolverineHandler>]
-    member this.HandleLinks(msg: UpdateMessage) =
-        this.extractInstagramVideoLinks msg |> List.map (publishToBusAsync >> Async.RunSynchronously) |> ignore
+    member this.HandleLinks(msg: UpdateMessage) : Task =
+        let links = this.extractInstagramVideoLinks msg
+        task {
+            for message in links do
+                do! publishToBusAsync message |> Async.StartAsTask
+        }
     [<WolverineHandler>]
-    member this.HandleShareLinks(msg: UpdateMessage) =
-        this.extractInstagramShareLinks msg |> List.map (publishToBusAsync >> Async.RunSynchronously) |> ignore
+    member this.HandleShareLinks(msg: UpdateMessage) : Task =
+        let links = this.extractInstagramShareLinks msg
+        task {
+            for message in links do
+                do! publishToBusAsync message |> Async.StartAsTask
+        }
     [<WolverineHandler>]
-    member this.HandleAudioLinks(msg: UpdateMessage) =
-        this.extractInstagramAudioLinks msg |> List.map (publishToBusAsync >> Async.RunSynchronously) |> ignore
+    member this.HandleAudioLinks(msg: UpdateMessage) : Task =
+        let links = this.extractInstagramAudioLinks msg
+        task {
+            for message in links do
+                do! publishToBusAsync message |> Async.StartAsTask
+        }
     member this.Handle(msg: InstagramMessage) =
-        this.processLink msg Instagram.getInstagramReplySync
+        this.processLinkAsync msg Instagram.getInstagramReply
     member this.Handle(msg: InstagramShareMessage) =
-        this.processLink msg Instagram.getInstagramShareReplySync
+        this.processLinkAsync msg Instagram.getInstagramShareReplyAsync
     member this.Handle(msg: InstagramAudioMessage) =
-        this.processLink msg Instagram.getInstagramAudioReply
+        this.processLinkAsync msg Instagram.getInstagramAudioReplyAsync
     

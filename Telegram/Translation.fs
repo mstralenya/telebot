@@ -10,23 +10,15 @@ open Telebot.TwitterData
 
 module Translation =
 
-    // Configuration from environment variables
-    let getLlmApiUrl () =
-        let url = Environment.GetEnvironmentVariable("LLM_API_URL")
-        if String.IsNullOrWhiteSpace(url) then None else Some (url.Trim())
+    // Configuration from Telebot.Config
+    let getLlmApiUrl () = Config.get().LlmApiUrl
 
-    let getLlmModel () =
-        let model = Environment.GetEnvironmentVariable("LLM_MODEL")
-        if String.IsNullOrWhiteSpace(model) then 
-            "hf.co/jcbtc/CHADROCK3.6-35B-UNCENSORED-MTP-STRIX-LEAN:latest"
-        else 
-            model.Trim()
+    let getLlmModel () = Config.get().LlmModel
 
     let getLlmSystemPrompt (targetLang: string) =
-        let customPrompt = Environment.GetEnvironmentVariable("LLM_SYSTEM_PROMPT")
-        if not (String.IsNullOrWhiteSpace(customPrompt)) then
-            customPrompt.Replace("{lang}", targetLang)
-        else
+        match Config.get().LlmSystemPromptTemplate with
+        | Some customPrompt -> customPrompt.Replace("{lang}", targetLang)
+        | None ->
             $"You are a professional translator. Translate the given text to {targetLang} language as accurately as possible. Preserve the tone, meaning, formatting, emojis, and hashtags of the original text. Output ONLY the translated text without any explanation, intro, or markdown formatting. If the text is already in {targetLang}, return it exactly as-is."
 
     let getFullLanguageName (langCode: string) =
@@ -100,68 +92,52 @@ module Translation =
 
     let private jsonOptions = JsonSerializerOptions(PropertyNameCaseInsensitive = true)
 
-    let getLlmApiType () =
-        let apiType = Environment.GetEnvironmentVariable("LLM_API_TYPE")
-        if String.IsNullOrWhiteSpace(apiType) then None else Some (apiType.Trim().ToLowerInvariant())
+    let internal getLlmApiType () = Config.get().LlmApiType
 
-    let getLlmEndpointAndType (apiUrl: string) =
+    /// Pure endpoint resolution: maps an API base url + optional type hint to a concrete endpoint.
+    let internal resolveEndpoint (envType: string option) (apiUrl: string) =
         let trimmed = apiUrl.Trim()
-        let envType = getLlmApiType()
-        
+
+        // Joins the base url with a path segment, normalizing trailing slashes
+        let join (suffix: string) =
+            if trimmed.EndsWith("/") then trimmed + suffix else trimmed + "/" + suffix
+
+        // Resolves <root> + <leaf> endpoints, e.g. "/v1" + "chat/completions"
+        let resolve (root: string) (leaf: string) (full: string) =
+            if trimmed.EndsWith(full) then trimmed
+            elif trimmed.EndsWith($"{root}/") then trimmed + leaf
+            elif trimmed.EndsWith(root) then $"{trimmed}/{leaf}"
+            else join $"{root.TrimStart('/')}/{leaf}"
+
         match envType with
         | Some "openai" | Some "openai_compat" | Some "llama.cpp" | Some "rocmfpx" | Some "llama_cpp" ->
-            let url =
-                if trimmed.EndsWith("/v1") then trimmed + "/chat/completions"
-                elif trimmed.EndsWith("/v1/") then trimmed + "chat/completions"
-                elif trimmed.EndsWith("/chat/completions") then trimmed
-                else 
-                    let baseTrimmed = if trimmed.EndsWith("/") then trimmed else trimmed + "/"
-                    if baseTrimmed.EndsWith("/v1/") then baseTrimmed + "chat/completions"
-                    else baseTrimmed + "v1/chat/completions"
-            url, "openai"
-            
+            resolve "/v1" "chat/completions" "/v1/chat/completions", "openai"
         | Some "ollama" | Some "ollama_chat" ->
-            let url =
-                if trimmed.EndsWith("/api") then trimmed + "/chat"
-                elif trimmed.EndsWith("/api/") then trimmed + "chat"
-                elif trimmed.EndsWith("/api/chat") then trimmed
-                else 
-                    let baseTrimmed = if trimmed.EndsWith("/") then trimmed else trimmed + "/"
-                    if baseTrimmed.EndsWith("/api/") then baseTrimmed + "chat"
-                    else baseTrimmed + "api/chat"
-            url, "ollama_chat"
-            
+            resolve "/api" "chat" "/api/chat", "ollama_chat"
         | Some "ollama_generate" ->
-            let url =
-                if trimmed.EndsWith("/api") then trimmed + "/generate"
-                elif trimmed.EndsWith("/api/") then trimmed + "generate"
-                elif trimmed.EndsWith("/api/generate") then trimmed
-                else 
-                    let baseTrimmed = if trimmed.EndsWith("/") then trimmed else trimmed + "/"
-                    if baseTrimmed.EndsWith("/api/") then baseTrimmed + "generate"
-                    else baseTrimmed + "api/generate"
-            url, "ollama_generate"
-            
+            resolve "/api" "generate" "/api/generate", "ollama_generate"
         | _ ->
             if trimmed.Contains("/v1") then
+                // Best-effort openai-compatible resolution without rewriting unknown paths
                 let url =
-                    if trimmed.EndsWith("/v1") then trimmed + "/chat/completions"
+                    if trimmed.EndsWith("/chat/completions") then trimmed
                     elif trimmed.EndsWith("/v1/") then trimmed + "chat/completions"
-                    elif trimmed.EndsWith("/chat/completions") then trimmed
+                    elif trimmed.EndsWith("/v1") then trimmed + "/chat/completions"
                     else trimmed
                 url, "openai"
             else
                 let url =
-                    if trimmed.EndsWith("/api") then trimmed + "/chat"
+                    if trimmed.EndsWith("/api/chat") || trimmed.EndsWith("/api/generate") then trimmed
                     elif trimmed.EndsWith("/api/") then trimmed + "chat"
-                    elif trimmed.EndsWith("/api/chat") || trimmed.EndsWith("/api/generate") then trimmed
-                    else 
-                        let baseTrimmed = if trimmed.EndsWith("/") then trimmed else trimmed + "/"
-                        baseTrimmed + "api/chat"
+                    elif trimmed.EndsWith("/api") then $"{trimmed}/chat"
+                    else join "api/chat"
                 let reqType = if url.EndsWith("/generate") then "ollama_generate" else "ollama_chat"
                 url, reqType
 
-    let private cleanThinkingTags (text: string) =
+    let getLlmEndpointAndType (apiUrl: string) =
+        resolveEndpoint (getLlmApiType ()) apiUrl
+
+    let internal cleanThinkingTags (text: string) =
         if String.IsNullOrWhiteSpace(text) then text
         else
             let regex = Text.RegularExpressions.Regex(@"<think>[\s\S]*?</think>", Text.RegularExpressions.RegexOptions.IgnoreCase)
@@ -174,7 +150,7 @@ module Translation =
             else
                 cleaned
 
-    let private isRussianOrEnglish (text: string) =
+    let internal isRussianOrEnglish (text: string) =
         let mutable cyrillic = 0
         let mutable latin = 0
         let mutable totalLetters = 0
@@ -202,6 +178,41 @@ module Translation =
                 else true
             else false
 
+    let private chatMessages systemPrompt text =
+        [|
+            { role = "system"; content = systemPrompt }
+            { role = "user"; content = text }
+        |]
+
+    let private serializeRequest model systemPrompt text endpointType =
+        match endpointType with
+        | "openai" ->
+            JsonSerializer.Serialize(
+                { model = model; messages = chatMessages systemPrompt text; temperature = 0.3; max_tokens = Some 1000 },
+                jsonOptions)
+        | "ollama_chat" ->
+            JsonSerializer.Serialize(
+                { model = model; messages = chatMessages systemPrompt text; stream = false; options = { temperature = 0.3 } },
+                jsonOptions)
+        | "ollama_generate" ->
+            JsonSerializer.Serialize(
+                { model = model; prompt = text; system = systemPrompt; stream = false; options = { temperature = 0.3 } },
+                jsonOptions)
+        | other -> failwith $"Unsupported endpoint type: {other}"
+
+    let private extractTranslatedText (resBody: string) endpointType =
+        match endpointType with
+        | "openai" ->
+            let res = JsonSerializer.Deserialize<OpenAiChatResponse>(resBody, jsonOptions)
+            if res.choices <> null && res.choices.Length > 0 then Some res.choices.[0].message.content else None
+        | "ollama_chat" ->
+            let res = JsonSerializer.Deserialize<OllamaChatResponse>(resBody, jsonOptions)
+            if res.message.content <> null then Some res.message.content else None
+        | "ollama_generate" ->
+            let res = JsonSerializer.Deserialize<OllamaGenerateResponse>(resBody, jsonOptions)
+            if res.response <> null then Some res.response else None
+        | _ -> None
+
     let translateTextAsync (text: string) (targetLang: string) : Async<TwitterTranslation option> =
         async {
             if isRussianOrEnglish text then return None
@@ -214,80 +225,21 @@ module Translation =
                     let fullLang = getFullLanguageName targetLang
                     let systemPrompt = getLlmSystemPrompt fullLang
                     let endpoint, endpointType = getLlmEndpointAndType apiUrl
-                    
+
                     Log.Information("Translating text using LLM ({Model}) via {EndpointType} endpoint at {Endpoint}", model, endpointType, endpoint)
-                    
-                    use client = new HttpClient()
-                    client.Timeout <- TimeSpan.FromSeconds(120.0)
-                    
-                    let jsonContent =
-                        match endpointType with
-                        | "openai" ->
-                            let req = {
-                                model = model
-                                messages = [|
-                                    { role = "system"; content = systemPrompt }
-                                    { role = "user"; content = text }
-                                |]
-                                temperature = 0.3
-                                max_tokens = Some 1000
-                            }
-                            JsonSerializer.Serialize(req, jsonOptions)
-                        | "ollama_chat" ->
-                            let req = {
-                                model = model
-                                messages = [|
-                                    { role = "system"; content = systemPrompt }
-                                    { role = "user"; content = text }
-                                |]
-                                stream = false
-                                options = { temperature = 0.3 }
-                            }
-                            JsonSerializer.Serialize(req, jsonOptions)
-                        | "ollama_generate" ->
-                            let req = {
-                                model = model
-                                prompt = text
-                                system = systemPrompt
-                                stream = false
-                                options = { temperature = 0.3 }
-                            }
-                            JsonSerializer.Serialize(req, jsonOptions)
-                        | _ -> failwith $"Unsupported endpoint type: {endpointType}"
-                        
-                    use content = new StringContent(jsonContent, Encoding.UTF8, "application/json")
+
+                    use content = new StringContent(serializeRequest model systemPrompt text endpointType, Encoding.UTF8, "application/json")
+                    let client = Telebot.HttpClient.createLlmClient ()
                     let! response = client.PostAsync(endpoint, content) |> Async.AwaitTask
-                    
+
                     if not response.IsSuccessStatusCode then
                         let! errContent = response.Content.ReadAsStringAsync() |> Async.AwaitTask
                         Log.Warning("LLM translation API returned status code {StatusCode}: {Error}", response.StatusCode, errContent)
                         return None
                     else
                         let! resBody = response.Content.ReadAsStringAsync() |> Async.AwaitTask
-                        
-                        let translatedText =
-                            match endpointType with
-                            | "openai" ->
-                                let res = JsonSerializer.Deserialize<OpenAiChatResponse>(resBody, jsonOptions)
-                                if res.choices <> null && res.choices.Length > 0 then
-                                    Some res.choices.[0].message.content
-                                else
-                                    None
-                            | "ollama_chat" ->
-                                let res = JsonSerializer.Deserialize<OllamaChatResponse>(resBody, jsonOptions)
-                                if res.message.content <> null then
-                                    Some res.message.content
-                                else
-                                    None
-                            | "ollama_generate" ->
-                                let res = JsonSerializer.Deserialize<OllamaGenerateResponse>(resBody, jsonOptions)
-                                if res.response <> null then
-                                    Some res.response
-                                else
-                                    None
-                            | _ -> None
-                            
-                        match translatedText with
+
+                        match extractTranslatedText resBody endpointType with
                         | Some t when not (String.IsNullOrWhiteSpace(t)) ->
                             let trimmedTranslation = cleanThinkingTags t
                             Log.Information("Successfully translated text with LLM. Length: {Length}", trimmedTranslation.Length)
@@ -310,9 +262,11 @@ module Translation =
         TranslatedText: string
     }
 
-    let getSqliteDbPath () =
-        let path = Environment.GetEnvironmentVariable("SQLITE_DB_PATH")
-        if String.IsNullOrWhiteSpace(path) then "data/telebot.db" else path.Trim()
+    let getSqliteDbPath () = Config.get().SqliteDbPath
+
+    /// How long cached translations stay retrievable (matches the "expired" wording shown to users)
+    let internal cacheTtlDays = 7
+    let private ttlModifier = $"-{cacheTtlDays} days"
 
     let initDb () =
         let dbPath = getSqliteDbPath ()
@@ -343,10 +297,11 @@ module Translation =
             use conn = new SqliteConnection(connectionString)
             conn.Open()
             use cmd = conn.CreateCommand()
-            cmd.CommandText <- "INSERT INTO translation_cache (key, original_text, translated_text) VALUES (@key, @orig, @trans);"
+            cmd.CommandText <- "INSERT INTO translation_cache (key, original_text, translated_text) VALUES (@key, @orig, @trans); DELETE FROM translation_cache WHERE created_at < datetime('now', @ttl);"
             cmd.Parameters.AddWithValue("@key", key) |> ignore
             cmd.Parameters.AddWithValue("@orig", original) |> ignore
             cmd.Parameters.AddWithValue("@trans", translated) |> ignore
+            cmd.Parameters.AddWithValue("@ttl", ttlModifier) |> ignore
             cmd.ExecuteNonQuery() |> ignore
             key
         with ex ->
@@ -360,8 +315,9 @@ module Translation =
             use conn = new SqliteConnection(connectionString)
             conn.Open()
             use cmd = conn.CreateCommand()
-            cmd.CommandText <- "SELECT original_text, translated_text FROM translation_cache WHERE key = @key LIMIT 1;"
+            cmd.CommandText <- "SELECT original_text, translated_text FROM translation_cache WHERE key = @key AND created_at >= datetime('now', @ttl) LIMIT 1;"
             cmd.Parameters.AddWithValue("@key", key) |> ignore
+            cmd.Parameters.AddWithValue("@ttl", ttlModifier) |> ignore
             use reader = cmd.ExecuteReader()
             if reader.Read() then
                 let orig = reader.GetString(0)

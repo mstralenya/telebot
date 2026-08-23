@@ -4,16 +4,18 @@ open System
 open System.Diagnostics
 open System.IO
 open System.Linq
+open System.Threading.Tasks
 open System.Text
 open System.Text.RegularExpressions
-open Newtonsoft.Json.Linq
+open System.Text.Json
+open System.Text.Json.Nodes
 open Serilog
 open Telebot.Bus
 open Telebot.Handlers
 open Telebot.PrometheusMetrics
 open Telebot.Messages
-open Telebot.Text
-open Telebot.Text.Reply
+open Telebot.Replies
+open Telebot.Replies.Reply
 open Wolverine.Attributes
 
 module Youtube =
@@ -102,43 +104,15 @@ module Youtube =
     let private ytDlpExe = resolveToolPath "yt-dlp"
     let private ffmpegExe = resolveToolPath "ffmpeg"
 
-    // Resolve cookies path if configured or present
+    // Resolve cookies path if configured or present (see Telebot.Config)
     let private cookiesArg =
-        try
-            let envPath = Environment.GetEnvironmentVariable("YOUTUBE_COOKIES_PATH")
-            if not (String.IsNullOrWhiteSpace(envPath)) && File.Exists(envPath) then
-                Log.Information("Using cookies from environment variable YOUTUBE_COOKIES_PATH: {Path}", envPath)
-                $" --cookies \"{envPath}\""
-            else
-                let searchDirs =
-                    [
-                        try Some (Directory.GetCurrentDirectory()) with _ -> None
-                        try Some AppContext.BaseDirectory with _ -> None
-                        try Some (Path.Combine(AppContext.BaseDirectory, "tools")) with _ -> None
-                    ]
-                    |> List.choose id
-                let cookieFiles = [ "youtube-cookies.txt"; "cookies.txt" ]
-                let foundFile =
-                    seq {
-                        for dir in searchDirs do
-                            for file in cookieFiles do
-                                yield Path.Combine(dir, file)
-                    }
-                    |> Seq.tryFind File.Exists
-                match foundFile with
-                | Some path ->
-                    Log.Information("Using cookies file: {Path}", path)
-                    $" --cookies \"{path}\""
-                | None ->
-                    Log.Information("No cookies file found for yt-dlp")
-                    ""
-        with ex ->
-            Log.Error(ex, "Error resolving cookies for yt-dlp")
-            ""
+        match Config.get().YoutubeCookiesPath with
+        | Some path -> $" --cookies \"{path}\""
+        | None -> ""
 
     let private proxyArg () =
-        if Telebot.HttpClient.ProxyConfig.useProxyForYoutube() then
-            match Telebot.HttpClient.ProxyConfig.getProxyUrl() with
+        if HttpClient.ProxyConfig.useProxyForYoutube() then
+            match HttpClient.ProxyConfig.getProxyUrl() with
             | Some url -> $" --proxy \"{url}\""
             | None -> ""
         else ""
@@ -165,117 +139,79 @@ module Youtube =
         audio_track_name: string option // e.g., "Original audio", "Dub" if present
     }
 
-    let private tryGet (tok: JToken) (name: string) =
-        if isNull tok then None else tok.SelectToken(name) |> Option.ofObj
+    // Resolves a dotted path ("a.b") to a node, returning None for missing keys or JSON nulls
+    let private selectNode (node: JsonNode) (path: string) : JsonNode option =
+        path.Split('.')
+        |> Array.fold (fun (current: JsonNode option) segment ->
+            current
+            |> Option.bind (fun parent ->
+                match parent[segment] with
+                | null -> None
+                | value ->
+                    if value.GetValueKind() = JsonValueKind.Null then None else Some value)) (Some node)
 
-    let private parseFormats (json: JToken) =
-        json.SelectToken("formats")
-        |> fun f -> if isNull f then Array.empty<JToken> else f.ToArray()
-        |> Array.choose (fun f ->
-            try
-                let str name =
-                    match f.SelectToken(name) with
-                    | null -> None
-                    | v when v.Type = JTokenType.Null -> None
-                    | v -> Some (string v)
-                let floatOpt name =
-                    match f.SelectToken(name) with
-                    | null -> None
-                    | v when v.Type = JTokenType.Null -> None
-                    | v ->
-                        match Double.TryParse(string v) with
-                        | true, d -> Some d
-                        | _ -> None
-                let int64Opt name =
-                    match f.SelectToken(name) with
-                    | null -> None
-                    | v when v.Type = JTokenType.Null -> None
-                    | v ->
-                        match Int64.TryParse(string v) with
-                        | true, d -> Some d
-                        | _ -> None
-                let intOpt name =
-                    match f.SelectToken(name) with
-                    | null -> None
-                    | v when v.Type = JTokenType.Null -> None
-                    | v ->
-                        match Int32.TryParse(string v) with
-                        | true, d -> Some d
-                        | _ -> None
-                // Some extractors use 'language', others 'lang', occasionally nested under 'audio_lang'
-                let lang =
-                    match f.SelectToken("language") with
-                    | null ->
-                        match f.SelectToken("lang") with
-                        | null ->
-                            match f.SelectToken("audio_lang") with
-                            | null -> None
-                            | v when v.Type = JTokenType.Null -> None
-                            | v -> Some (string v)
-                        | v when v.Type = JTokenType.Null -> None
-                        | v -> Some (string v)
-                    | v when v.Type = JTokenType.Null -> None
-                    | v -> Some (string v)
-                let atId =
-                    match f.SelectToken("audio_track.id") with
-                    | null -> None
-                    | v when v.Type = JTokenType.Null -> None
-                    | v -> Some (string v)
-                let atName =
-                    match f.SelectToken("audio_track.name") with
-                    | null -> None
-                    | v when v.Type = JTokenType.Null -> None
-                    | v -> Some (string v)
-                let note =
-                    match f.SelectToken("format_note") with
-                    | null -> None
-                    | v when v.Type = JTokenType.Null -> None
-                    | v -> Some (string v)
-                let formatStr =
-                    match f.SelectToken("format") with
-                    | null -> None
-                    | v when v.Type = JTokenType.Null -> None
-                    | v -> Some (string v)
-                let urlStr =
-                    match f.SelectToken("url") with
-                    | null -> None
-                    | v when v.Type = JTokenType.Null -> None
-                    | v -> Some (string v)
-                let isOrig =
-                    let low s = if String.IsNullOrWhiteSpace(s) then "" else s.ToLowerInvariant()
-                    let n = atName |> Option.defaultValue "" |> low
-                    let i = atId |> Option.defaultValue "" |> low
-                    let l = lang |> Option.defaultValue "" |> low
-                    let fn = note |> Option.defaultValue "" |> low
-                    let fmt = formatStr |> Option.defaultValue "" |> low
-                    let u = urlStr |> Option.defaultValue "" |> low
-                    // Detect "original" from multiple possible places: audio_track, language, format_note, format string, or URL xtags (acont=original)
-                    let hasOrig =
-                        n.Contains("original") || i = "original" || l = "original" ||
-                        fn.Contains("original") || fmt.Contains("original") ||
-                        u.Contains("acont%3Doriginal") || u.Contains("acont=original")
-                    // Try to avoid commentary/dub tracks even if marked original in some fields
-                    let looksDub =
-                        n.Contains("dub") || n.Contains("description") || n.Contains("commentary") || n.Contains("narration") || fn.Contains("dub")
-                    if hasOrig && not looksDub then Some true else None
-                Some {
-                    format_id = str "format_id" |> Option.defaultValue ""
-                    ext = str "ext"
-                    vcodec = str "vcodec"
-                    acodec = str "acodec"
-                    tbr = floatOpt "tbr"
-                    abr = floatOpt "abr"
-                    vbr = floatOpt "vbr"
-                    filesize = int64Opt "filesize"
-                    filesize_approx = int64Opt "filesize_approx"
-                    width = intOpt "width"
-                    height = intOpt "height"
-                    language = lang
-                    audio_is_original = isOrig
-                    audio_track_id = atId
-                    audio_track_name = atName
-                }
-            with _ -> None)
+    let internal parseFormats (json: JsonNode) =
+        match json["formats"] with
+        | null -> Array.empty
+        | formatsToken ->
+            formatsToken.AsArray()
+            |> Seq.toArray
+            |> Array.choose (fun f ->
+                try
+                    // Reads a value as a string option, mapping missing keys and JSON nulls to None
+                    let opt (name: string) = selectNode f name |> Option.map _.ToString()
+                    let str = opt
+                    let parseWith parse name = opt name |> Option.bind (parse >> function true, v -> Some v | _ -> None)
+                    let floatOpt name = parseWith Double.TryParse name
+                    let int64Opt name = parseWith Int64.TryParse name
+                    let intOpt name = parseWith Int32.TryParse name
+                    // Some extractors use 'language', others 'lang', occasionally nested under 'audio_lang'
+                    let lang =
+                        opt "language"
+                        |> Option.orElse (opt "lang")
+                        |> Option.orElse (opt "audio_lang")
+                    let atId = opt "audio_track.id"
+                    let atName = opt "audio_track.name"
+                    let note = opt "format_note"
+                    let formatStr = opt "format"
+                    let urlStr = opt "url"
+
+                    let isOrig =
+                        let low s = if String.IsNullOrWhiteSpace(s) then "" else s.ToLowerInvariant()
+                        let n = atName |> Option.defaultValue "" |> low
+                        let i = atId |> Option.defaultValue "" |> low
+                        let l = lang |> Option.defaultValue "" |> low
+                        let fn = note |> Option.defaultValue "" |> low
+                        let fmt = formatStr |> Option.defaultValue "" |> low
+                        let u = urlStr |> Option.defaultValue "" |> low
+                        // Detect "original" from multiple possible places: audio_track, language, format_note, format string, or URL xtags (acont=original)
+                        let hasOrig =
+                            n.Contains("original") || i = "original" || l = "original" ||
+                            fn.Contains("original") || fmt.Contains("original") ||
+                            u.Contains("acont%3Doriginal") || u.Contains("acont=original")
+                        // Try to avoid commentary/dub tracks even if marked original in some fields
+                        let looksDub =
+                            n.Contains("dub") || n.Contains("description") || n.Contains("commentary") || n.Contains("narration") || fn.Contains("dub")
+                        if hasOrig && not looksDub then Some true else None
+
+                    Some {
+                        format_id = str "format_id" |> Option.defaultValue ""
+                        ext = str "ext"
+                        vcodec = str "vcodec"
+                        acodec = str "acodec"
+                        tbr = floatOpt "tbr"
+                        abr = floatOpt "abr"
+                        vbr = floatOpt "vbr"
+                        filesize = int64Opt "filesize"
+                        filesize_approx = int64Opt "filesize_approx"
+                        width = intOpt "width"
+                        height = intOpt "height"
+                        language = lang
+                        audio_is_original = isOrig
+                        audio_track_id = atId
+                        audio_track_name = atName
+                    }
+                with _ -> None)
 
     let private estimateSize (durationSec: float) (v: YtFormat option) (a: YtFormat option) =
         let sizeFromBitrate kbps =
@@ -295,7 +231,7 @@ module Youtube =
         | None, Some asz -> Some asz
         | None, None -> None
 
-    let private pickBestCombo (durationSec: float) (formats: YtFormat array) =
+    let internal pickBestCombo (durationSec: float) (formats: YtFormat array) =
         let videos =
             formats
             |> Array.filter (fun f -> f.vcodec |> Option.exists (fun v -> v <> "none") && f.acodec |> Option.exists (fun a -> a = "none"))
@@ -363,7 +299,7 @@ module Youtube =
             Log.Warning("yt-dlp -J failed: {stderr}", stderr)
             None
         else
-            try Some (JToken.Parse stdout) with ex -> Log.Error(ex, "Failed to parse yt-dlp JSON"); None
+            try Some (JsonNode.Parse stdout) with ex -> Log.Error(ex, "Failed to parse yt-dlp JSON"); None
 
     let private safeDelete (path: string) =
         try
@@ -432,8 +368,8 @@ module Youtube =
                 let dir = if String.IsNullOrWhiteSpace(dir) then Directory.GetCurrentDirectory() else dir
                 let baseNameNoExt = Path.GetFileNameWithoutExtension(outFile)
                 let candidates = Directory.GetFiles(dir, baseNameNoExt + ".f*.*")
-                let vPath = candidates |> Array.tryFind (fun p -> p.Contains($".f{vId}"))
-                let aPath = candidates |> Array.tryFind (fun p -> p.Contains($".f{aId}"))
+                let vPath = candidates |> Array.tryFind _.Contains($".f{vId}")
+                let aPath = candidates |> Array.tryFind _.Contains($".f{aId}")
                 match vPath, aPath with
                 | Some vp, Some ap ->
                     let ffArgs = $"-y -i \"{vp}\" -i \"{ap}\" -c:v copy -c:a copy -movflags +faststart \"{outFile}\""
@@ -483,13 +419,13 @@ module Youtube =
                     youtubeFailureCounter.Inc()
                     return Some msg
                 | Some json ->
-                    let title = json.SelectToken("title") |> Option.ofObj |> Option.map string
-                    let id = json.SelectToken("id") |> Option.ofObj |> Option.map string |> Option.defaultValue (Guid.NewGuid().ToString("N"))
+                    let title = json["title"] |> Option.ofObj |> Option.map _.ToString()
+                    let id = json["id"] |> Option.ofObj |> Option.map _.ToString() |> Option.defaultValue (Guid.NewGuid().ToString("N"))
                     let duration =
-                        match json.SelectToken("duration") with
+                        match json["duration"] with
                         | null -> 0.0
                         | v ->
-                            match Double.TryParse(string v) with
+                            match Double.TryParse(v.ToString()) with
                             | true, d -> d
                             | _ -> 0.0
                     let formats = parseFormats json
@@ -550,7 +486,6 @@ module Youtube =
                 youtubeFailureCounter.Inc()
                 return None
         }
-        |> Async.RunSynchronously
 
     let getYoutubeAudioReply (url: string) =
         async {
@@ -561,7 +496,7 @@ module Youtube =
                     youtubeFailureCounter.Inc()
                     return Some msg
                 | Some json ->
-                    let id = json.SelectToken("id") |> Option.ofObj |> Option.map string |> Option.defaultValue (Guid.NewGuid().ToString("N"))
+                    let id = json["id"] |> Option.ofObj |> Option.map _.ToString() |> Option.defaultValue (Guid.NewGuid().ToString("N"))
                     let formats = parseFormats json
                     let audios = formats |> Array.filter (fun f -> f.acodec |> Option.exists (fun a -> a <> "none") && f.vcodec |> Option.exists (fun v -> v = "none"))
                     if audios.Length = 0 then
@@ -585,7 +520,6 @@ module Youtube =
                 youtubeFailureCounter.Inc()
                 return None
         }
-        |> Async.RunSynchronously
 
 
 type YoutubeLinksHandler() =
@@ -595,12 +529,20 @@ type YoutubeLinksHandler() =
     member private this.extractYoutubeVideoLinks =
         createLinkExtractor Youtube.getYoutubeVideoLinks YoutubeMessage
     [<WolverineHandler>]
-    member this.HandleAudioLinks(msg: UpdateMessage) =
-        this.extractYoutubeAudioLinks msg |> List.map (publishToBusAsync >> Async.RunSynchronously) |> ignore
+    member this.HandleAudioLinks(msg: UpdateMessage) : Task =
+        let links = this.extractYoutubeAudioLinks msg
+        task {
+            for message in links do
+                do! publishToBusAsync message |> Async.StartAsTask
+        }
     [<WolverineHandler>]
-    member this.HandleVideoLinks(msg: UpdateMessage) =
-        this.extractYoutubeVideoLinks msg |> List.map (publishToBusAsync >> Async.RunSynchronously) |> ignore
+    member this.HandleVideoLinks(msg: UpdateMessage) : Task =
+        let links = this.extractYoutubeVideoLinks msg
+        task {
+            for message in links do
+                do! publishToBusAsync message |> Async.StartAsTask
+        }
     member this.Handle(msg: YoutubeAudioMessage) =
-        this.processLink msg (Youtube.getYoutubeAudioReply)
+        this.processLinkAsync msg Youtube.getYoutubeAudioReply
     member this.Handle(msg: YoutubeMessage) =
-        this.processLink msg Youtube.getYoutubeReply
+        this.processLinkAsync msg Youtube.getYoutubeReply

@@ -20,12 +20,6 @@ let processingTimeSummary =
         )
     )
 
-let messageSuccessCounter =
-    Metrics.CreateCounter("telebot_success_total", "Number of successfully processed messages")
-
-let messageFailureCounter =
-    Metrics.CreateCounter("telebot_failures_total", "Number of failed message processing attempts")
-
 let receivedMessagesCounter =
     Metrics.CreateCounter("telebot_received_messages_total", "Total number of messages received by the bot", [|"chat"; "chat_type"; "user"|])
 
@@ -83,9 +77,6 @@ let thumbnailSuccessCounter =
 let thumbnailFailureCounter =
     Metrics.CreateCounter("telebot_thumbnail_failures_total", "Number of failed thumbnail extractions")
 
-let videoProcessingDuration =
-    Metrics.CreateHistogram("telebot_video_processing_duration_seconds", "Video processing duration", [|"operation"|])
-
 // Platform-specific metrics
 let instagramSuccessCounter =
     Metrics.CreateCounter("telebot_instagram_successes_total", "Number of successful Instagram link extractions")
@@ -95,9 +86,6 @@ let instagramFailureCounter =
 
 let instagramMissingVideoIdCounter =
     Metrics.CreateCounter("telebot_instagram_missing_video_id_total", "Number of missing Instagram video IDs")
-
-let tiktokMissingVideoIdMetric =
-    Metrics.CreateCounter("telebot_tiktok_missing_video_id_total", "Number of missing TikTok video IDs")
 
 let tiktokSuccessMetric =
     Metrics.CreateCounter("telebot_tiktok_success_total", "Number of successful TikTok video downloads")
@@ -118,9 +106,6 @@ let twitterFailureCounter =
     Metrics.CreateCounter("telebot_twitter_failures_total", "Number of failed Twitter media downloads")
 
 // Message bus metrics
-let messageBusQueueSize =
-    Metrics.CreateGauge("telebot_message_bus_queue_size", "Current message bus queue size")
-
 let messageBusProcessingRate =
     Metrics.CreateCounter("telebot_message_bus_processed_total", "Total messages processed by the bus", [|"handler"|])
 
@@ -136,13 +121,6 @@ let applicationUptime =
 
 let healthCheckStatus =
     Metrics.CreateGauge("telebot_health_check_status", "Health check status (1 = healthy, 0 = unhealthy)", [|"check_name"|])
-
-// Rate limiting metrics
-let rateLimitedRequestsCounter =
-    Metrics.CreateCounter("telebot_rate_limited_requests_total", "Number of rate-limited requests", [|"platform"|])
-
-let retryAttemptsCounter =
-    Metrics.CreateCounter("telebot_retry_attempts_total", "Number of retry attempts", [|"operation"; "attempt"|])
 
 // Initialize application metrics
 let initializeApplicationMetrics () =

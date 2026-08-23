@@ -8,89 +8,94 @@ open Serilog
 open Telebot.Bus
 open Telebot.DataTypes
 open Telebot.Messages
-open Telebot.Text
+open Telebot.Replies
 open Telebot.Policies
 open Telebot.PrometheusMetrics
-
-// Generic link extractor function
-let extractLinks<'T>
-    (linkExtractor: string option -> string list)
-    (messageConstructor: string -> UpdateMessage -> 'T)
-    (message: UpdateMessage)
-    : 'T list =
-    linkExtractor message.MessageText
-    |> List.map (fun url -> messageConstructor url message)
 
 // Higher-order function to create specialized extractors
 let createLinkExtractor (getLinks: string option -> string list) (mkMessage: string * UpdateMessage -> 'T) : UpdateMessage -> 'T list =
     fun msg -> msg.MessageText |> getLinks |> List.map (fun url -> mkMessage (url, msg))
 
-// shape that is published afterwards
+// shape that is published afterwards.
+// NOTE: must stay JSON-serializable over the bus transport — do not put
+// abstract types (e.g. Telebot.Messages.Message) in here; carry the plain data instead.
 type ProcessingResult =
     {
         Success: bool
         ElapsedMs: float
-        Link: Message
+        Url: string
+        OriginalMessage: UpdateMessage
         Reply: Reply option
     }
 
-//create abstract class BaseHandler with processLink method
 type BaseHandler() =
-    member this.processLink (link: Message) (getReply: string -> Reply option) : Task =
+    /// Runs getReply with up to three attempts when exceptions occur.
+    /// The outcome is always reported on the bus; a faulting operation is rethrown afterwards.
+    member _.processLinkAsync (link: Message) (getReply: string -> Async<Reply option>) : Task =
         task {
             let sw = Stopwatch.StartNew()
-            let mutable ok = false
-            let mutable rep = None
 
-            try
-                tryThreeTimes (fun () ->
-                    match getReply link.Url with
-                    | Some r ->
-                        ok <- true
-                        rep <- Some r
-                    | None -> ok <- false)
-            finally
-                sw.Stop()
+            let! outcome =
+                tryThreeTimesAsync (fun () ->
+                    async {
+                        match! getReply link.Url with
+                        | Some reply -> return true, Some reply
+                        | None -> return false, None
+                    })
+                |> Async.Catch
+                |> Async.StartAsTask
 
-                let result =
-                    {
-                        Success = ok
-                        ElapsedMs = sw.Elapsed.TotalMilliseconds
-                        Link = link
-                        Reply = rep
-                    }
+            sw.Stop()
 
-                publishToBus result
+            let success, reply =
+                match outcome with
+                | Choice1Of2 (success, reply) -> success, reply
+                | Choice2Of2 _ -> false, None
+
+            let result = {
+                Success = success
+                ElapsedMs = sw.Elapsed.TotalMilliseconds
+                Url = link.Url
+                OriginalMessage = link.OriginalMessage
+                Reply = reply
+            }
+
+            do! publishToBusAsync result |> Async.StartAsTask
+
+            match outcome with
+            | Choice2Of2 ex ->
+                Log.Error(ex, "Handler failed for link {Url}", link.Url)
+                raise ex
+            | Choice1Of2 _ -> ()
         }
 
 type ResultHandler =
-    // Add parameterless constructor
     new() = {  }
-    // Process result handler
     member this.Handle(msg: ProcessingResult) : Task =
         task {
             // Log and record metrics
             processingTimeSummary.Observe msg.ElapsedMs
 
-            let ctx = Text.createUpdateContext()
+            let ctx = createUpdateContext()
             if msg.Success then
-                Log.Debug $"Successfully processed link: {msg.Link.Url}"
+                Log.Debug $"Successfully processed link: {msg.Url}"
                 // Send the reply if successful and there is one
                 match msg.Reply with
-                | Some r -> reply (r, msg.Link.OriginalMessage.MessageId, msg.Link.OriginalMessage.ChatId, ctx)
+                | Some r ->
+                    do! replyAsync (r, msg.OriginalMessage.MessageId, msg.OriginalMessage.ChatId, ctx)
+                        |> Async.StartAsTask
                 | None -> ()
             else
-                Log.Error $"Failed to process link: {msg.Link.Url}"
+                Log.Error $"Failed to process link: {msg.Url}"
                 // Send error message
                 let message =
                     Req.SendMessage.Make(
-                        msg.Link.OriginalMessage.ChatId,
+                        msg.OriginalMessage.ChatId,
                         "Failed to process link",
                         replyParameters =
-                            ReplyParameters.Create(msg.Link.OriginalMessage.MessageId.MessageId, msg.Link.OriginalMessage.ChatId),
+                            ReplyParameters.Create(msg.OriginalMessage.MessageId.MessageId, msg.OriginalMessage.ChatId),
                         parseMode = ParseMode.HTML
                     )
 
-                sendRequestAsync message ctx
-                |> Async.RunSynchronously
+                do! sendRequestAsync message ctx |> Async.StartAsTask
         }

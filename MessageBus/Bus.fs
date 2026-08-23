@@ -1,6 +1,7 @@
 module Telebot.Bus
 
 open System
+open System.Threading.Tasks
 open Microsoft.Extensions.DependencyInjection
 open Microsoft.Extensions.Hosting
 open Microsoft.Extensions.Logging
@@ -16,12 +17,7 @@ let mutable private busHost: IHost option = None
 let private lockObj = obj()
 
 let getRedisConnectionString () =
-    let conn = Environment.GetEnvironmentVariable("REDIS_CONNECTION_STRING")
-    if String.IsNullOrWhiteSpace(conn) then
-        let url = Environment.GetEnvironmentVariable("REDIS_URL")
-        if String.IsNullOrWhiteSpace(url) then "127.0.0.1:6379" else url.Trim()
-    else
-        conn.Trim()
+    Config.get().RedisConnectionString
 
 // Initialize the bus asynchronously
 let initializeBusAsync () : Async<unit> =
@@ -37,14 +33,17 @@ let initializeBusAsync () : Async<unit> =
                     .CreateDefaultBuilder()
                     .UseWolverine(fun opts ->
                         // Configure System.Text.Json serializer options for F# types (Discriminated Unions, Records, Options)
-                        opts.UseSystemTextJsonForSerialization(Action<System.Text.Json.JsonSerializerOptions>(fun jsonOpts ->
-                            jsonOpts.Converters.Add(JsonFSharpConverter())
+                        opts.UseSystemTextJsonForSerialization(Action<System.Text.Json.JsonSerializerOptions>(_.Converters.Add(JsonFSharpConverter())
                         ))
 
-                        // Configure Redis Transport for persistent message streams
+                        // Configure Redis Transport for persistent message streams.
+                        // Buffered mode processes messages in parallel (see MAX_PARALLEL_MESSAGES),
+                        // while still keeping them persisted in the stream until acknowledged.
                         opts.UseRedisTransport(redisConn).AutoProvision() |> ignore
                         opts.PublishAllMessages().ToRedisStream("telebot-messages") |> ignore
-                        opts.ListenToRedisStream("telebot-messages", "telebot-consumer-group").Sequential() |> ignore
+                        opts.ListenToRedisStream("telebot-messages", "telebot-consumer-group")
+                            .BufferedInMemory()
+                            .MaximumParallelMessages(Config.get().MaxParallelMessages) |> ignore
                         
                         // Configure logging and metrics
                         opts.Policies.LogMessageStarting(LogLevel.Information)
@@ -69,54 +68,42 @@ let getBusAsync () : Async<IMessageBus> =
             return busHost.Value.Services.GetRequiredService<IMessageBus>()
     }
 
-// Send a message asynchronously with telemetry
-let sendToBusAsync<'T> (message: 'T) : Async<unit> =
-    withOperationTelemetry "message_bus_send" (fun scope ->
+// Shared implementation for sending/publishing messages with telemetry
+let private dispatchToBusAsync<'T>
+    (telemetryName: string)
+    (label: string)
+    (doing: string)
+    (doneWord: string)
+    (invoke: IMessageBus -> 'T -> Task)
+    (message: 'T) : Async<unit> =
+    withOperationTelemetry telemetryName (fun scope ->
         async {
             try
                 TelemetryScope.addProperty "message_type" (typeof<'T>.Name) scope |> ignore
-                TelemetryScope.logInfo $"Sending message of type {typeof<'T>.Name}" scope
-                
+                TelemetryScope.logInfo $"{doing} message of type {typeof<'T>.Name}" scope
+
                 let! bus = getBusAsync ()
-                do! bus.SendAsync message |> fun vt -> vt.AsTask() |> Async.AwaitTask
-                
-                messageBusProcessingRate.WithLabels([|"send"|]).Inc()
-                TelemetryScope.logInfo "Message sent successfully" scope
+                do! invoke bus message |> Async.AwaitTask
+
+                messageBusProcessingRate.WithLabels([|label|]).Inc()
+                TelemetryScope.logInfo $"Message {doneWord} successfully" scope
             with
             | ex ->
-                messageBusErrors.WithLabels([|"send_error"|]).Inc()
-                TelemetryScope.logError (Some ex) "Error sending message" scope
+                messageBusErrors.WithLabels([|$"{label}_error"|]).Inc()
+                TelemetryScope.logError (Some ex) $"Error {doneWord} message" scope
                 raise ex
         }
     )
+
+// Send a message asynchronously with telemetry
+let sendToBusAsync<'T> (message: 'T) : Async<unit> =
+    dispatchToBusAsync "message_bus_send" "send" "Sending" "sent"
+        (fun bus msg -> bus.SendAsync(msg).AsTask()) message
 
 // Publish a message asynchronously with telemetry
 let publishToBusAsync<'T> (message: 'T) : Async<unit> =
-    withOperationTelemetry "message_bus_publish" (fun scope ->
-        async {
-            try
-                TelemetryScope.addProperty "message_type" (typeof<'T>.Name) scope |> ignore
-                TelemetryScope.logInfo $"Publishing message of type {typeof<'T>.Name}" scope
-                
-                let! bus = getBusAsync ()
-                do! bus.PublishAsync message |> fun vt -> vt.AsTask() |> Async.AwaitTask
-                
-                messageBusProcessingRate.WithLabels([|"publish"|]).Inc()
-                TelemetryScope.logInfo "Message published successfully" scope
-            with
-            | ex ->
-                messageBusErrors.WithLabels([|"publish_error"|]).Inc()
-                TelemetryScope.logError (Some ex) "Error publishing message" scope
-                raise ex
-        }
-    )
-
-// Backward compatibility - synchronous versions (discouraged)
-let sendToBus<'T> (message: 'T) : unit =
-    sendToBusAsync message |> Async.RunSynchronously
-
-let publishToBus<'T> (message: 'T) : unit =
-    publishToBusAsync message |> Async.RunSynchronously
+    dispatchToBusAsync "message_bus_publish" "publish" "Publishing" "published"
+        (fun bus msg -> bus.PublishAsync(msg).AsTask()) message
 
 // Shutdown the bus asynchronously
 let shutdownBusAsync () : Async<unit> =
@@ -135,10 +122,6 @@ let shutdownBusAsync () : Async<unit> =
         | None -> 
             Log.Debug("Message bus was not initialized, nothing to shut down")
     }
-
-// Backward compatibility - synchronous version
-let shutdownBus () : unit =
-    shutdownBusAsync () |> Async.RunSynchronously
 
 // Health check for the message bus
 let healthCheckAsync () : Async<bool> =
@@ -174,7 +157,3 @@ let updateQueueMetrics () : Async<unit> =
         | ex ->
             Log.Warning(ex, "Failed to update queue metrics")
     }
-
-// Initialize the bus (convenience function)
-let initializeBus () : unit =
-    initializeBusAsync () |> Async.RunSynchronously

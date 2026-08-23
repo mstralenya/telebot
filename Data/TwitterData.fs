@@ -168,10 +168,10 @@ module FxConverter =
     let rec private toTwitterQrt (fxTweet: FxTweet) : TwitterQrt =
         let mediaList =
             fxTweet.media
-            |> Option.bind (fun m -> m.all)
+            |> Option.bind _.all
             |> Option.defaultValue []
             |> List.map mapMediaItem
-        let mediaUrls = mediaList |> List.map (fun m -> m.url)
+        let mediaUrls = mediaList |> List.map _.url
         {
             allSameType = allSameType mediaList
             combinedMediaUrl = None
@@ -182,7 +182,7 @@ module FxConverter =
             hasMedia = not mediaList.IsEmpty
             mediaURLs = mediaUrls
             media_extended = mediaList
-            qrtURL = fxTweet.quote |> Option.map (fun q -> q.url) |> Option.defaultValue ""
+            qrtURL = fxTweet.quote |> Option.map _.url |> Option.defaultValue ""
             text = fxTweet.text
             tweetID = fxTweet.id
             tweetURL = fxTweet.url
@@ -195,16 +195,16 @@ module FxConverter =
     let rec toTweet (fxTweet: FxTweet) : Tweet =
         let mediaList =
             fxTweet.media
-            |> Option.bind (fun m -> m.all)
+            |> Option.bind _.all
             |> Option.defaultValue []
             |> List.map mapMediaItem
-        let mediaUrls = mediaList |> List.map (fun m -> m.url)
+        let mediaUrls = mediaList |> List.map _.url
         {
             date_epoch = fxTweet.created_timestamp
             mediaURLs = mediaUrls
             media_extended = mediaList
             qrt = fxTweet.quote |> Option.map toTwitterQrt
-            qrtURL = fxTweet.quote |> Option.map (fun q -> q.url) |> Option.defaultValue ""
+            qrtURL = fxTweet.quote |> Option.map _.url |> Option.defaultValue ""
             text = fxTweet.text
             tweetID = fxTweet.id
             tweetURL = fxTweet.url

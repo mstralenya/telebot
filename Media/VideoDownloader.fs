@@ -1,0 +1,221 @@
+module Telebot.VideoDownloader
+
+open System
+open System.Diagnostics
+open System.IO
+open System.Threading.Tasks
+open Telebot.PrometheusMetrics
+open Telebot.DataTypes
+open Telebot.Ffmpeg
+open Telebot.TelemetryService
+
+// Async file download with telemetry and resource management.
+// Streams the response to disk to avoid buffering large media in memory.
+let downloadFileAsync (url: string) (filePath: string) (useProxy: bool) : Async<unit> =
+    withOperationTelemetry "file_download" (fun scope ->
+        async {
+            try
+                TelemetryScope.addProperty "url" url scope |> ignore
+                TelemetryScope.addProperty "file_path" filePath scope |> ignore
+                TelemetryScope.addProperty "use_proxy" useProxy scope |> ignore
+                TelemetryScope.logInfo $"Starting download from {url} to {filePath} (useProxy={useProxy})" scope
+
+                let! response = HttpClient.getAsync url useProxy
+                use _ = response
+                response.EnsureSuccessStatusCode() |> ignore
+
+                use targetStream = File.Create filePath
+                do! response.Content.CopyToAsync(targetStream) |> Async.AwaitTask
+                let fileSize = targetStream.Length
+
+                // Record metrics
+                downloadCounter.Inc()
+                let fileExtension = Path.GetExtension(filePath).TrimStart('.')
+                fileSizeHistogram.WithLabels([|fileExtension|]).Observe(float fileSize)
+
+                TelemetryScope.addProperty "file_size" fileSize scope |> ignore
+                TelemetryScope.logInfo $"Download completed successfully, file size: {fileSize} bytes" scope
+
+            with
+            | ex ->
+                TelemetryScope.logError (Some ex) $"Failed to download file from {url}" scope
+                raise ex
+        }
+    )
+// Download media with better async handling
+let downloadMediaAsync (url: string) (isVideo: bool) (useProxy: bool) : Async<GalleryDisplay> =
+    withOperationTelemetry "media_download" (fun scope ->
+        async {
+            let name = Guid.NewGuid()
+            let extension = if isVideo then "mp4" else "jpg"
+            let fileName = $"{name}.{extension}"
+
+            TelemetryScope.addProperty "is_video" isVideo scope |> ignore
+            TelemetryScope.addProperty "file_name" fileName scope |> ignore
+            let mediaType = if isVideo then "video" else "image"
+            TelemetryScope.logInfo (sprintf "Downloading %s media" mediaType) scope
+
+            do! downloadFileAsync url fileName useProxy
+
+            if isVideo then
+                do! ensureVideoHasAudioAsync fileName
+
+            return if isVideo then Video fileName else Photo fileName
+        }
+    )
+
+let downloadMediaWithAudioAsync (url: string) (audioUrl: string option) (isVideo: bool) (useProxy: bool) : Async<GalleryDisplay> =
+    match audioUrl with
+    | Some aUrl when isVideo ->
+        withOperationTelemetry "media_download_dash" (fun scope ->
+            async {
+                let name = Guid.NewGuid()
+                let videoFile = $"{name}_v.mp4"
+                let audioFile = $"{name}_a.mp4"
+                let finalFile = $"{name}.mp4"
+
+                TelemetryScope.addProperty "video_url" url scope |> ignore
+                TelemetryScope.addProperty "audio_url" aUrl scope |> ignore
+                TelemetryScope.addProperty "video_file" videoFile scope |> ignore
+                TelemetryScope.addProperty "audio_file" audioFile scope |> ignore
+                TelemetryScope.addProperty "final_file" finalFile scope |> ignore
+                TelemetryScope.logInfo "Downloading DASH video and audio separately" scope
+
+                let! _ = Async.Parallel [ downloadFileAsync url videoFile useProxy; downloadFileAsync aUrl audioFile useProxy ]
+
+                TelemetryScope.logInfo "Files downloaded, initiating ffmpeg merge" scope
+
+                let ffmpegArgs = sprintf "-y -v error -i \"%s\" -i \"%s\" -c:v copy -c:a aac \"%s\"" videoFile audioFile finalFile
+
+                match! runProcessCaptureAsync "ffmpeg" ffmpegArgs ffmpegTimeoutMs with
+                | Error msg ->
+                    TelemetryScope.logError None $"Failed to merge audio: {msg}" scope
+                | Ok (mergeExitCode, _, error) ->
+                    if mergeExitCode <> 0 then
+                        TelemetryScope.logError None $"Failed to merge audio. ffmpeg error: {error}" scope
+                        // Fallback to ensuring audio on the video file if merge fails
+                        File.Move(videoFile, finalFile)
+                        do! ensureVideoHasAudioAsync finalFile
+                    else
+                        TelemetryScope.logInfo "Video and audio merged successfully" scope
+                
+                if File.Exists videoFile then File.Delete videoFile
+                if File.Exists audioFile then File.Delete audioFile
+
+                return Video finalFile
+            }
+        )
+    | _ -> downloadMediaAsync url isVideo useProxy
+
+// Async file deletion with telemetry
+let deleteFileAsync (filePath: string) : Async<unit> =
+    withOperationTelemetry "file_delete" (fun scope ->
+        async {
+            try
+                TelemetryScope.addProperty "file_path" filePath scope |> ignore
+
+                if File.Exists filePath then
+                    do! Task.Run(fun () -> File.Delete filePath) |> Async.AwaitTask
+                    deleteCounter.Inc()
+                    TelemetryScope.logInfo $"File deleted successfully: {filePath}" scope
+                else
+                    TelemetryScope.logWarning $"File not found for deletion: {filePath}" scope
+            with
+            | ex ->
+                TelemetryScope.logError (Some ex) $"Failed to delete file: {filePath}" scope
+                raise ex
+        }
+    )
+
+// Utility functions
+let getThumbnailName (videoPath: string) = $"{videoPath}.jpg"
+
+// Get video thumbnail asynchronously
+let getVideoThumbnailAsync (videoPath: string) : Async<string option> =
+    async {
+        let thumbnailFilename = getThumbnailName videoPath
+        let! success = extractThumbnailAsync videoPath thumbnailFilename
+        return if success then Some thumbnailFilename else None
+    }
+
+// Get video size asynchronously
+let getVideoSizeAsync (filePath: string) : Async<int64 option * int64 option * int64 option> =
+    async {
+        let! info = getVideoInfoAsync filePath
+
+        return match info with
+                | Some (d, w, h) -> Some d, Some w, Some h
+                | None -> None, None, None
+    }
+
+// Shrink video if it is larger than 50MB (using 48MB threshold for safety margin)
+let shrinkVideoIfNeededAsync (videoPath: string) : Async<string> =
+    withOperationTelemetry "video_shrink" (fun scope ->
+        async {
+            try
+                TelemetryScope.addProperty "video_path" videoPath scope |> ignore
+                
+                if not (File.Exists videoPath) then
+                    return videoPath
+                else
+                    let fileInfo = FileInfo videoPath
+                    let limit = 50L * 1024L * 1024L
+                    let threshold = 48L * 1024L * 1024L
+                    
+                    if fileInfo.Length <= threshold then
+                        return videoPath
+                    else
+                        TelemetryScope.logInfo $"Video file size ({fileInfo.Length} bytes) exceeds threshold. Initiating shrink." scope
+                        
+                        let! videoInfo = getVideoInfoAsync videoPath
+                        let tempFile = $"{videoPath}.compressed.mp4"
+                        
+                        let ffmpegArgs =
+                            match videoInfo with
+                            | Some (duration, _, _) when duration > 0L ->
+                                // Calculate target bitrate to fit in ~45MB
+                                let targetBytes = 45L * 1024L * 1024L
+                                let targetSizeInBits = float targetBytes * 8.0
+                                let totalBitrate = targetSizeInBits / float duration
+
+                                let audioBitrate = 96000.0
+                                let videoBitrate = Math.Max(totalBitrate - audioBitrate, 100000.0)
+
+                                let scaleFilter =
+                                    if videoBitrate < 800000.0 then "scale='min(854,iw)':-2"
+                                    elif videoBitrate < 2000000.0 then "scale='min(1280,iw)':-2"
+                                    else "scale='min(1920,iw)':-2"
+
+                                TelemetryScope.logInfo $"Calculated video bitrate: {videoBitrate} bps, audio: {audioBitrate} bps, scale: {scaleFilter}" scope
+
+                                sprintf "-y -v error -i \"%s\" -c:v libx264 -b:v %.0f -maxrate %.0f -bufsize %.0f -vf \"%s\" -c:a aac -b:a %.0f -movflags +faststart \"%s\""
+                                    videoPath videoBitrate videoBitrate (videoBitrate * 2.0) scaleFilter audioBitrate tempFile
+                            | _ ->
+                                TelemetryScope.logWarning "Video duration not found. Falling back to default CRF-based compression." scope
+                                sprintf "-y -v error -i \"%s\" -c:v libx264 -crf 28 -preset fast -c:a aac -b:a 128k -movflags +faststart \"%s\""
+                                    videoPath tempFile
+
+                        match! runProcessCaptureAsync "ffmpeg" ffmpegArgs ffmpegTimeoutMs with
+                        | Error msg ->
+                            TelemetryScope.logError None $"Failed to shrink video: {msg}" scope
+                        | Ok (shrinkExitCode, _, error) ->
+                            if shrinkExitCode = 0 && File.Exists tempFile then
+                                let compressedInfo = FileInfo tempFile
+                                if compressedInfo.Length < limit then
+                                    File.Delete videoPath
+                                    File.Move(tempFile, videoPath)
+                                    TelemetryScope.logInfo $"Video shrunk successfully. New size: {compressedInfo.Length} bytes" scope
+                                else
+                                    TelemetryScope.logWarning $"Shrunk video is still too large ({compressedInfo.Length} bytes). Deleting temp file." scope
+                                    if File.Exists tempFile then File.Delete tempFile
+                            else
+                                TelemetryScope.logError None $"ffmpeg size reduction failed. Code: {shrinkExitCode}, Error: {error}" scope
+                                if File.Exists tempFile then File.Delete tempFile
+
+                        return videoPath
+            with
+            | ex ->
+                TelemetryScope.logError (Some ex) "Error during video shrinking" scope
+                return videoPath
+        }
+    )

@@ -1,0 +1,37 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <IsPackable>false</IsPackable>
+    <!-- Matches the suppression in telebot.fsproj: Suave pins FSharp.Core =10.0.102,
+         Funogram requires >=10.1.301; newer FSharp.Core is safe at runtime. -->
+    <NoWarn>$(NoWarn);NU1608</NoWarn>
+    <AssemblyName>telebot.Tests</AssemblyName>
+    <RootNamespace>Telebot.Tests</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="BusSerializationTests.fs" />
+    <Compile Include="TranslationTests.fs" />
+    <Compile Include="YoutubeTests.fs" />
+    <Compile Include="RepliesTests.fs" />
+    <Compile Include="TwitterTests.fs" />
+    <Compile Include="InfraTests.fs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
+    <PackageReference Include="xunit" Version="2.9.3" />
+    <PackageReference Include="FSharp.SystemTextJson" Version="1.4.36" />
+    <PackageReference Update="FSharp.Core" Version="10.1.400" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="3.1.0">
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+      <PrivateAssets>all</PrivateAssets>
+    </PackageReference>
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\telebot.fsproj" />
+  </ItemGroup>
+
+</Project>

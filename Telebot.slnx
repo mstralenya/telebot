@@ -1,0 +1,6 @@
+<Solution>
+  <Folder Name="/tests/">
+    <Project Path="tests/telebot.Tests/telebot.Tests.fsproj" />
+  </Folder>
+  <Project Path="telebot.fsproj" />
+</Solution>

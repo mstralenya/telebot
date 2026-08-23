@@ -110,7 +110,7 @@ module TelemetryScope =
 
     let complete scope =
         scope.Stopwatch.Stop()
-        scope.Activity |> Option.iter (fun a -> a.Dispose())
+        scope.Activity |> Option.iter _.Dispose()
 
 // Higher-order function for scoped telemetry operations
 let withTelemetry<'T> (context: TelemetryContext) (operation: TelemetryScope -> Async<'T>) : Async<'T> =

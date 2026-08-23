@@ -14,12 +14,10 @@ type UpdateMessage =
     }
 
 
-// Different message types for specific link types
+// Base class for link messages published to the bus.
+// Concrete message types below are what handlers subscribe to.
+[<AbstractClass>]
 type Message(url: string, originalMessage: UpdateMessage) =
-    do 
-        if typeof<Message>.IsAssignableFrom(typedefof<Message>) && 
-           obj.ReferenceEquals(typeof<Message>, _.GetType()) then
-            invalidOp "Message class should not be instantiated directly"
     /// The public URL associated with the message.
     [<Audit>]
     member _.Url: string = url
@@ -50,13 +48,3 @@ type YoutubeMessage(url, originalMessage) =
 
 type YoutubeAudioMessage(url, originalMessage) =
     inherit Message(url, originalMessage)
-
-
-// Processing result message
-type ProcessingResult =
-    {
-        Success: bool
-        ElapsedMs: float
-        Message: Message
-        Reply: Reply option
-    }

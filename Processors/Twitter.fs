@@ -2,6 +2,7 @@ module Telebot.Twitter
 
 open Funogram.Telegram.Types
 open System.Linq
+open System.Threading.Tasks
 open System.Net.Http.Json
 open System.Text.Json
 open System.Text.RegularExpressions
@@ -10,45 +11,33 @@ open Telebot.Bus
 open Telebot.Handlers
 open Telebot.PrometheusMetrics
 open Telebot.Messages
-open Telebot.Text
+open Telebot.Replies
 open Telebot.TwitterData
 open Telebot.VideoDownloader
 
 module Twitter =
     // Function to replace the domain in the URL and append translation language suffix if configured
     let private replaceDomain (url: string) =
-        let envLang = System.Environment.GetEnvironmentVariable("TWITTER_TRANSLATION_LANG")
-        let envApiBase = System.Environment.GetEnvironmentVariable("TWITTER_API_BASE")
-        let vxString =
-            if System.String.IsNullOrWhiteSpace(envApiBase) then
-                "https://api.fxtwitter.com/"
-            else
-                let trimmed = envApiBase.Trim()
-                if trimmed.EndsWith("/") then trimmed else trimmed + "/"
-
+        let config = Config.get ()
         let replaced =
-            url.Replace("https://x.com/", vxString)
-               .Replace("https://twitter.com/", vxString)
-        
-        if System.String.IsNullOrWhiteSpace(envLang) then
-            replaced
-        else
-            let langCode = envLang.Trim()
-            let trimmed = replaced.TrimEnd('/')
-            $"{trimmed}/{langCode}"
+            url.Replace("https://x.com/", config.TwitterApiBase)
+               .Replace("https://twitter.com/", config.TwitterApiBase)
+
+        match config.TwitterTranslationLang with
+        | None -> replaced
+        | Some langCode -> $"{replaced.TrimEnd('/')}/{langCode}"
 
     // Main function to process the URL and return the Tweet structure
     let private getTweetFromUrlAsync (url: string) =
         async {
             let newUrl = replaceDomain url
-            let envLang = System.Environment.GetEnvironmentVariable("TWITTER_TRANSLATION_LANG")
-            if not (System.String.IsNullOrWhiteSpace(envLang)) then
-                Log.Information("Fetching Twitter URL {Url} with translation to {Lang}", url, envLang.Trim())
-            else
-                Log.Information("Fetching Twitter URL {Url} without translation", url)
+            match Config.get().TwitterTranslationLang with
+            | Some lang -> Log.Information("Fetching Twitter URL {Url} with translation to {Lang}", url, lang)
+            | None -> Log.Information("Fetching Twitter URL {Url} without translation", url)
 
-            let useProxy = Telebot.HttpClient.ProxyConfig.useProxyForTwitter()
+            let useProxy = HttpClient.ProxyConfig.useProxyForTwitter()
             let! response = HttpClient.getAsync newUrl useProxy
+            use _ = response
             let options = JsonSerializerOptions()
             options.PropertyNameCaseInsensitive <- true
             match response.StatusCode with
@@ -70,7 +59,7 @@ module Twitter =
     // Function to process a list of URLs and return an array of results
     let private processUrlsAsync (urls: TwitterMediaExtended list) =
         async {
-            let useProxy = Telebot.HttpClient.ProxyConfig.useProxyForTwitter()
+            let useProxy = HttpClient.ProxyConfig.useProxyForTwitter()
             let! results =
                 urls
                 |> List.map (fun media -> downloadMediaAsync media.url (media.mediaType = TwitterMedia.Video) useProxy)
@@ -83,6 +72,16 @@ module Twitter =
         | Some qrt -> tweet.media_extended @ qrt.media_extended // Concatenate the two lists if qrt is Some
         | None -> tweet.media_extended // If qrt is None, just return the main tweet's mediaURLs
 
+    // Formats a tweet (and optionally its quoted tweet) into the HTML message body
+    let internal renderTweet (screenName: string) (userName: string) (body: string option) (qrt: TwitterQrt option) (qrtBody: string option) : string =
+        match body with
+        | Some t ->
+            match qrt, qrtBody with
+            | Some q, Some qtxt ->
+                $"""<b>{userName}</b> <i>(@​{screenName})</i>:<blockquote>{t}</blockquote>Quoting <b>{q.user_name}</b><i>(@​{q.user_screen_name})</i>:<blockquote>{qtxt}</blockquote>"""
+            | _ -> $"<b>{userName}</b> <i>(@​{screenName})</i>: <blockquote>{t}</blockquote>"
+        | None -> $"<b>{userName}</b> <i>(@​{screenName})</i>:"
+
     let getTwitterReplyAsync (chatId: ChatId) (url: string) =
         async {
             try
@@ -94,10 +93,10 @@ module Twitter =
                 | Some tweet ->
                     let! tweet =
                         async {
-                            let envLang = System.Environment.GetEnvironmentVariable("TWITTER_TRANSLATION_LANG")
+                            let config = Config.get ()
                             let isLlmEnabled = Translation.getLlmApiUrl().IsSome
-                            if isLlmEnabled && not (System.String.IsNullOrWhiteSpace(envLang)) then
-                                let targetLang = envLang.Trim()
+                            match config.TwitterTranslationLang with
+                            | Some targetLang when isLlmEnabled ->
                                 let! mainTl =
                                     match tweet.text with
                                     | Some txt when not (System.String.IsNullOrWhiteSpace(txt)) ->
@@ -125,8 +124,7 @@ module Twitter =
                                     | Some tl -> { tweet with translation = Some tl; qrt = updatedQrt }
                                     | None -> { tweet with qrt = updatedQrt }
                                 return updatedTweet
-                            else
-                                return tweet
+                            | _ -> return tweet
                         }
 
                     let textToUse =
@@ -149,21 +147,8 @@ module Twitter =
                         | None -> None
 
                     let replyText =
-                        match tweet.user_screen_name, tweet.user_name, textToUse, tweet.qrt with
-                        | ah,
-                          a,
-                          Some t,
-                          Some qrt ->
-                            match qrtTextToUse with
-                            | Some qtxt ->
-                                let qa = qrt.user_name
-                                let qah = qrt.user_screen_name
-                                Some
-                                    $"""<b>{a}</b> <i>(@​{ah})</i>:<blockquote>{t}</blockquote>Quoting <b>{qa}</b><i>(@​{qah})</i>:<blockquote>{qtxt}</blockquote>"""
-                            | None ->
-                                Some $"<b>{a}</b> <i>(@​{ah})</i>: <blockquote>{t}</blockquote>"
-                        | ah, a, Some t, _ -> Some $"<b>{a}</b> <i>(@​{ah})</i>: <blockquote>{t}</blockquote>"
-                        | ah, a, _, _ -> Some $"<b>{a}</b> <i>(@​{ah})</i>:"
+                        renderTweet tweet.user_screen_name tweet.user_name textToUse tweet.qrt qrtTextToUse
+                        |> Some
 
                     let mediaUrls = mergeMediaUrls tweet
                     let! gallery = processUrlsAsync mediaUrls
@@ -181,17 +166,7 @@ module Twitter =
 
                     if hasTranslation && replyText.IsSome then
                         let originalText =
-                            match tweet.user_screen_name, tweet.user_name, tweet.text, tweet.qrt with
-                            | ah, a, Some t, Some qrt ->
-                                match qrt.text with
-                                | Some qtxt ->
-                                    let qa = qrt.user_name
-                                    let qah = qrt.user_screen_name
-                                    $"""<b>{a}</b> <i>(@​{ah})</i>:<blockquote>{t}</blockquote>Quoting <b>{qa}</b><i>(@​{qah})</i>:<blockquote>{qtxt}</blockquote>"""
-                                | None ->
-                                    $"<b>{a}</b> <i>(@​{ah})</i>: <blockquote>{t}</blockquote>"
-                            | ah, a, Some t, _ -> $"<b>{a}</b> <i>(@​{ah})</i>: <blockquote>{t}</blockquote>"
-                            | ah, a, _, _ -> $"<b>{a}</b> <i>(@​{ah})</i>:"
+                            renderTweet tweet.user_screen_name tweet.user_name tweet.text tweet.qrt (tweet.qrt |> Option.bind _.text)
 
                         let isGroupChat =
                             match chatId with
@@ -200,17 +175,14 @@ module Twitter =
 
                         let cacheId = Translation.saveTranslationToCache originalText replyText.Value
                         let btnToggle = InlineKeyboardButton.Create("Show Original Text", callbackData = $"show_orig:{cacheId}")
-                        
+
                         let buttons =
-                            if not isGroupChat then
-                                let webAppBase = System.Environment.GetEnvironmentVariable("WEBAPP_BASE_URL")
-                                if not (System.String.IsNullOrWhiteSpace(webAppBase)) then
-                                    let url = $"{webAppBase.Trim().TrimEnd('/')}/webapp?id={cacheId}"
-                                    let btnWebApp = InlineKeyboardButton.Create("Original (Web)", webApp = WebAppInfo.Create(url))
-                                    [| [| btnWebApp; btnToggle |] |]
-                                else
-                                    [| [| btnToggle |] |]
-                            else
+                            match Config.get().WebAppBaseUrl with
+                            | Some webAppBase when not isGroupChat ->
+                                let url = $"{webAppBase.TrimEnd('/')}/webapp?id={cacheId}"
+                                let btnWebApp = InlineKeyboardButton.Create("Original (Web)", webApp = WebAppInfo.Create(url))
+                                [| [| btnWebApp; btnToggle |] |]
+                            | _ ->
                                 [| [| btnToggle |] |]
 
                         let keyboard = InlineKeyboardMarkup.Create(buttons)
@@ -224,9 +196,6 @@ module Twitter =
                 return None
         }
 
-    let getTwitterReply (chatId: ChatId) (url: string) =
-        getTwitterReplyAsync chatId url |> Async.RunSynchronously
-
     let getTwitterLinks (message: string option) = getLinks twitterRegex message
 
 type TwitterLinksHandler() =
@@ -235,8 +204,12 @@ type TwitterLinksHandler() =
     member private this.extractTwitterLinks =
         createLinkExtractor Twitter.getTwitterLinks TwitterMessage
 
-    member this.Handle(msg: UpdateMessage) =
-        this.extractTwitterLinks msg |> List.map (publishToBusAsync >> Async.RunSynchronously) |> ignore
+    member this.Handle(msg: UpdateMessage) : Task =
+        let links = this.extractTwitterLinks msg
+        task {
+            for message in links do
+                do! publishToBusAsync message |> Async.StartAsTask
+        }
 
     member this.Handle(msg: TwitterMessage) =
-        this.processLink msg (Twitter.getTwitterReply msg.OriginalMessage.ChatId)
+        this.processLinkAsync msg (Twitter.getTwitterReplyAsync msg.OriginalMessage.ChatId)
