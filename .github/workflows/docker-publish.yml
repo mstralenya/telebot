@@ -25,6 +25,25 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # Compute semver: MAJOR.MINOR from VERSION file, PATCH = commits since it last changed.
+      # Deterministic on every runner, so GitHub and Gitea always produce the same version.
+      # Editing VERSION (minor/major bump) resets the patch counter to 0.
+      - name: Compute version
+        id: ver
+        run: |
+          BASE="$(tr -d '[:space:]' < VERSION)"
+          LAST="$(git rev-list -n1 HEAD -- VERSION || true)"
+          if [ -n "$LAST" ]; then
+            PATCH=$(git rev-list --count "${LAST}..HEAD")
+          else
+            PATCH=$(git rev-list --count HEAD)
+          fi
+          VERSION="${BASE}.${PATCH}"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "Computed version: ${VERSION}"
 
       # Install the cosign tool except on PR
       - name: Install cosign
@@ -53,6 +72,10 @@ jobs:
         uses: docker/metadata-action@96383f45573cb7f253c731d3b3ab81c87ef81934 # v5.0.0
         with:
           images: ${{ env.REGISTRY }}/${{ secrets.DOCKER_USERNAME }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=raw,value=${{ steps.ver.outputs.version }},enable=${{ github.event_name != 'pull_request' }}
+            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/master' }}
+            type=ref,event=branch
 
       # Build and push Docker image with Buildx (don't push on PR)
       - name: Build and push Docker image
@@ -63,6 +86,8 @@ jobs:
           push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            APP_VERSION=${{ steps.ver.outputs.version }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 

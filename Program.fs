@@ -30,6 +30,15 @@ let configureLogging () =
 
     Log.Information("Structured logging configured")
 
+// Application version: set via TELEBOT_VERSION env var in Docker, falls back to assembly version
+let appVersion () =
+    match Environment.GetEnvironmentVariable "TELEBOT_VERSION" with
+    | v when not (String.IsNullOrWhiteSpace v) -> v
+    | _ ->
+        let asm = System.Reflection.Assembly.GetExecutingAssembly().GetName()
+        let v = asm.Version
+        if isNull v then "unknown" else v.ToString()
+
 // Graceful shutdown handler
 let setupGracefulShutdown () =
     let shutdown () =
@@ -92,7 +101,7 @@ let mainAsync () : Async<int> =
             // Setup graceful shutdown
             setupGracefulShutdown()
 
-            Log.Information("Starting Telebot application...")
+            Log.Information("Starting Telebot application... (version {Version})", appVersion())
 
             return! withOperationTelemetry "application_startup" (fun scope ->
                 async {
