@@ -24,7 +24,8 @@ let private vaapiConfig () =
 
 let internal videoEncoderArgs () =
     match vaapiConfig () with
-    | Some device -> $"-vaapi_device \"{device}\""
+    | Some device ->
+        $"-hwaccel vaapi -hwaccel_device \"{device}\" -hwaccel_output_format vaapi -vaapi_device \"{device}\""
     | _ -> ""
 
 let internal videoEncoderName () =
@@ -34,10 +35,10 @@ let internal videoEncoderName () =
     else
         configured
 
-let internal videoFilterArgs (filter: string) =
+let internal videoScaleFilterArgs maxWidth =
     match vaapiConfig () with
-    | Some _ -> $"-vf \"{filter},format=nv12,hwupload\""
-    | None -> $"-vf \"{filter}\""
+    | Some _ -> $"-vf \"scale_vaapi=w='min({maxWidth},iw)':h=-2:format=nv12\""
+    | None -> $"-vf \"scale='min({maxWidth},iw)':-2\""
 
 let internal videoQualityArgs quality preset =
     match vaapiConfig () with

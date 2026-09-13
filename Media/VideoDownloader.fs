@@ -189,15 +189,15 @@ let shrinkVideoIfNeededAsync (videoPath: string) : Async<string> =
                                 let audioBitrate = 96000.0
                                 let videoBitrate = Math.Max(totalBitrate - audioBitrate, 100000.0)
 
-                                let scaleFilter =
-                                    if videoBitrate < 800000.0 then "scale='min(854,iw)':-2"
-                                    elif videoBitrate < 2000000.0 then "scale='min(1280,iw)':-2"
-                                    else "scale='min(1920,iw)':-2"
+                                let maxWidth =
+                                    if videoBitrate < 800000.0 then 854
+                                    elif videoBitrate < 2000000.0 then 1280
+                                    else 1920
 
-                                TelemetryScope.logInfo $"Calculated video bitrate: {videoBitrate} bps, audio: {audioBitrate} bps, scale: {scaleFilter}" scope
+                                TelemetryScope.logInfo $"Calculated video bitrate: {videoBitrate} bps, audio: {audioBitrate} bps, max width: {maxWidth}" scope
 
                                 sprintf "-y -v error %s -i \"%s\" -c:v %s -b:v %.0f -maxrate %.0f -bufsize %.0f %s -c:a aac -b:a %.0f -movflags +faststart \"%s\""
-                                    (videoEncoderArgs ()) videoPath (videoEncoderName ()) videoBitrate videoBitrate (videoBitrate * 2.0) (videoFilterArgs scaleFilter) audioBitrate tempFile
+                                    (videoEncoderArgs ()) videoPath (videoEncoderName ()) videoBitrate videoBitrate (videoBitrate * 2.0) (videoScaleFilterArgs maxWidth) audioBitrate tempFile
                             | _ ->
                                 TelemetryScope.logWarning "Video duration not found. Falling back to default CRF-based compression." scope
                                 sprintf "-y -v error %s -i \"%s\" -c:v %s %s -c:a aac -b:a 128k -movflags +faststart \"%s\""

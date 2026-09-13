@@ -446,8 +446,7 @@ module Youtube =
                                         let tmp = Path.ChangeExtension(path, ".smaller.mp4")
                                         let encoderArgs = videoEncoderArgs ()
                                         let encoder = videoEncoderName ()
-                                        let filterArgs = videoFilterArgs "null"
-                                        let ffArgs = $"-y {encoderArgs} -i \"{path}\" -c:v {encoder} -b:v {videoKbps:F0}k {filterArgs} -c:a copy -movflags +faststart \"{tmp}\""
+                                        let ffArgs = $"-y {encoderArgs} -i \"{path}\" -c:v {encoder} -b:v {videoKbps:F0}k -c:a copy -movflags +faststart \"{tmp}\""
                                         let! encodeResult = runVideoEncodeAsync ffmpegExe ffArgs 300_000
                                         let code, _o, e =
                                             match encodeResult with
