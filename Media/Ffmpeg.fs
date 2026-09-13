@@ -4,6 +4,7 @@ open System
 open System.Diagnostics
 open System.IO
 open System.Text.RegularExpressions
+open System.Threading
 open System.Threading.Tasks
 open Telebot.PrometheusMetrics
 open Telebot.TelemetryService
@@ -11,6 +12,37 @@ open Telebot.TelemetryService
 // Timeouts for external tool invocations
 let internal probeTimeoutMs = 30_000
 let internal ffmpegTimeoutMs = 15 * 60 * 1000
+let private videoEncodeSemaphore =
+    lazy (new SemaphoreSlim(Config.get().MaxParallelVideoEncodes))
+
+let private vaapiConfig () =
+    let config = Config.get ()
+    if config.FfmpegVideoEncoder.EndsWith("_vaapi", StringComparison.OrdinalIgnoreCase) then
+        config.FfmpegVaapiDevice
+    else
+        None
+
+let internal videoEncoderArgs () =
+    match vaapiConfig () with
+    | Some device -> $"-vaapi_device \"{device}\""
+    | _ -> ""
+
+let internal videoEncoderName () =
+    let configured = Config.get().FfmpegVideoEncoder
+    if configured.EndsWith("_vaapi", StringComparison.OrdinalIgnoreCase) && vaapiConfig().IsNone then
+        "libx264"
+    else
+        configured
+
+let internal videoFilterArgs (filter: string) =
+    match vaapiConfig () with
+    | Some _ -> $"-vf \"{filter},format=nv12,hwupload\""
+    | None -> $"-vf \"{filter}\""
+
+let internal videoQualityArgs quality preset =
+    match vaapiConfig () with
+    | Some _ -> $"-qp {quality}"
+    | None -> $"-crf {quality} -preset {preset}"
 
 /// Runs an external process, draining stdout/stderr concurrently so a full pipe
 /// buffer can never deadlock the child, and kills it when `timeoutMs` elapses.
@@ -31,26 +63,36 @@ let internal runProcessCaptureAsync
             )
 
         use proc = new Process(StartInfo = startInfo)
-        let! started = Task.Run(fun () -> proc.Start()) |> Async.AwaitTask
+        let started = proc.Start()
 
         if not started then
             return Error $"Failed to start process '{fileName}'"
         else
-            let! stdoutTask = proc.StandardOutput.ReadToEndAsync() |> Async.AwaitTask |> Async.StartChild
-            let! stderrTask = proc.StandardError.ReadToEndAsync() |> Async.AwaitTask |> Async.StartChild
-            let! exited = Task.Run(fun () -> proc.WaitForExit(timeoutMs)) |> Async.AwaitTask
+            let stdoutTask = proc.StandardOutput.ReadToEndAsync()
+            let stderrTask = proc.StandardError.ReadToEndAsync()
+            use timeout = new CancellationTokenSource(timeoutMs)
 
-            if not exited then
-                try proc.Kill(true) with _ -> ()
-
-            // Drain both streams in every case so the reader tasks always complete
-            let! stdout = stdoutTask
-            let! stderr = stderrTask
-
-            if exited then
+            try
+                do! proc.WaitForExitAsync(timeout.Token) |> Async.AwaitTask
+                let! stdout = stdoutTask |> Async.AwaitTask
+                let! stderr = stderrTask |> Async.AwaitTask
                 return Ok (proc.ExitCode, stdout, stderr)
-            else
+            with :? OperationCanceledException ->
+                try proc.Kill(true) with _ -> ()
+                do! proc.WaitForExitAsync() |> Async.AwaitTask
+                let! _ = stdoutTask |> Async.AwaitTask
+                let! _ = stderrTask |> Async.AwaitTask
                 return Error $"{fileName} timed out after {timeoutMs} ms and was killed"
+    }
+
+let internal runVideoEncodeAsync fileName arguments timeoutMs =
+    async {
+        let semaphore = videoEncodeSemaphore.Value
+        do! semaphore.WaitAsync() |> Async.AwaitTask
+        try
+            return! runProcessCaptureAsync fileName arguments timeoutMs
+        finally
+            semaphore.Release() |> ignore
     }
 
 let ensureVideoHasAudioAsync (filePath: string) : Async<unit> =
@@ -144,59 +186,23 @@ let extractThumbnailAsync (videoPath: string) (outputPath: string) : Async<bool>
                 TelemetryScope.addProperty "output_path" outputPath scope |> ignore
                 TelemetryScope.logInfo $"Extracting thumbnail from {videoPath} to {outputPath}" scope
 
-                let ffmpegPath = "ffmpeg"
                 let arguments =
                     sprintf """ -y -i "%s" -vf "blackframe=0,metadata=select:key=lavfi.blackframe.pblack:value=90:function=less,scale='if(gt(iw,ih),320,-1)':'if(gt(ih,iw),320,-1)'" -frames:v 1 -q:v 2 -update 1 "%s" """ videoPath outputPath
 
-                let startInfo =
-                    ProcessStartInfo(
-                        FileName = ffmpegPath,
-                        Arguments = arguments,
-                        UseShellExecute = false,
-                        RedirectStandardOutput = true,
-                        RedirectStandardError = true,
-                        CreateNoWindow = true
-                    )
-
-                use thumbnailProcess = new Process(StartInfo = startInfo)
-
-                let! startResult = Task.Run(fun () -> thumbnailProcess.Start()) |> Async.AwaitTask
-                if not startResult then
-                    raise (InvalidOperationException("Failed to start ffmpeg process"))
-
-                // Read streams asynchronously without blocking
-                let readStreamAsync (streamReader: StreamReader) =
-                    async {
-                        let lines = System.Collections.Generic.List<string>()
-                        let mutable line = ""
-                        while not streamReader.EndOfStream do
-                            let! currentLine = streamReader.ReadLineAsync() |> Async.AwaitTask
-                            line <- currentLine
-                            lines.Add(line)
-                        return lines |> List.ofSeq
-                    }
-
-                let! outputTask = readStreamAsync thumbnailProcess.StandardOutput |> Async.StartChild
-                let! errorTask = readStreamAsync thumbnailProcess.StandardError |> Async.StartChild
-
-                let! exited = Task.Run(fun () -> thumbnailProcess.WaitForExit(ffmpegTimeoutMs)) |> Async.AwaitTask
-                if not exited then
-                    try thumbnailProcess.Kill(true) with _ -> ()
-
-                do! Task.Run(fun () -> thumbnailProcess.WaitForExit()) |> Async.AwaitTask
-
-                let! outputLines = outputTask
-                let! errorLines = errorTask
-
-                if thumbnailProcess.ExitCode <> 0 then
+                match! runProcessCaptureAsync "ffmpeg" arguments ffmpegTimeoutMs with
+                | Error error ->
                     thumbnailFailureCounter.Inc()
-                    let errorOutput = String.Join("\n", errorLines)
-                    TelemetryScope.logError None $"Thumbnail extraction failed: {errorOutput}" scope
+                    TelemetryScope.logError None $"Thumbnail extraction failed: {error}" scope
                     return false
-                else
-                    thumbnailSuccessCounter.Inc()
-                    TelemetryScope.logInfo "Thumbnail extracted successfully" scope
-                    return true
+                | Ok (exitCode, _, error) ->
+                    if exitCode <> 0 then
+                        thumbnailFailureCounter.Inc()
+                        TelemetryScope.logError None $"Thumbnail extraction failed: {error}" scope
+                        return false
+                    else
+                        thumbnailSuccessCounter.Inc()
+                        TelemetryScope.logInfo "Thumbnail extracted successfully" scope
+                        return true
 
             with
             | ex ->

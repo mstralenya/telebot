@@ -91,7 +91,8 @@ let private dispatchToBusAsync<'T>
             | ex ->
                 messageBusErrors.WithLabels([|$"{label}_error"|]).Inc()
                 TelemetryScope.logError (Some ex) $"Error {doneWord} message" scope
-                raise ex
+                System.Runtime.ExceptionServices.ExceptionDispatchInfo.Throw(ex)
+                return ()
         }
     )
 

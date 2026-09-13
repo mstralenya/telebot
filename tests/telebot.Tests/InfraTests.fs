@@ -4,6 +4,7 @@ open System
 open Xunit
 open Telebot.Config
 open Telebot.HttpClient
+open Telebot.LoggingHandler
 
 /// Starts a local server answering 503 once and 200 afterwards; returns (url, hitCount ref, stop)
 let private startFlakyServer () =
@@ -80,3 +81,10 @@ let ``parseIdSet returns empty set for missing or empty values`` () =
     Environment.SetEnvironmentVariable("TEST_IDS_MISSING", "")
     let ids = parseIdSet "TEST_IDS_MISSING"
     Assert.Empty(ids)
+
+[<Theory>]
+[<InlineData("Req: GET https://api.telegram.org/bot123456:secret/getMe", "Req: GET https://api.telegram.org/bot<redacted>/getMe")>]
+[<InlineData("https://API.TELEGRAM.ORG/BOTtoken/sendMessage payload", "https://API.TELEGRAM.ORG/BOT<redacted>/sendMessage payload")>]
+[<InlineData("ordinary log line", "ordinary log line")>]
+let ``Telegram bot tokens are redacted from logs`` (input, expected) =
+    Assert.Equal(expected, redactSensitiveText input)

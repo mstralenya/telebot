@@ -65,7 +65,7 @@ type BaseHandler() =
             match outcome with
             | Choice2Of2 ex ->
                 Log.Error(ex, "Handler failed for link {Url}", link.Url)
-                raise ex
+                System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(ex).Throw()
             | Choice1Of2 _ -> ()
         }
 

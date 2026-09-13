@@ -11,7 +11,9 @@ open Telebot.TwitterData
 module Translation =
 
     // Configuration from Telebot.Config
-    let getLlmApiUrl () = Config.get().LlmApiUrl
+    let getLlmApiUrl () =
+        let config = Config.get ()
+        if config.LlmTranslationEnabled then config.LlmApiUrl else None
 
     let getLlmModel () = Config.get().LlmModel
 

@@ -52,10 +52,14 @@ type AppConfig = {
     UseProxyForYoutube: bool
     TwitterApiBase: string
     TwitterTranslationLang: string option
+    LlmTranslationEnabled: bool
     LlmApiUrl: string option
     LlmApiType: string option
     LlmModel: string
     LlmSystemPromptTemplate: string option
+    FfmpegVideoEncoder: string
+    FfmpegVaapiDevice: string option
+    MaxParallelVideoEncodes: int
 }
 
 let private defaultRedisConnectionString = "127.0.0.1:6379"
@@ -125,10 +129,14 @@ let private load () : AppConfig =
         UseProxyForYoutube = flag "USE_PROXY_FOR_YOUTUBE"
         TwitterApiBase = twitterApiBase
         TwitterTranslationLang = trimmed "TWITTER_TRANSLATION_LANG"
+        LlmTranslationEnabled = flag "LLM_TRANSLATION_ENABLED"
         LlmApiUrl = trimmed "LLM_API_URL"
         LlmApiType = trimmed "LLM_API_TYPE" |> Option.map _.ToLowerInvariant()
         LlmModel = defaultArg (trimmed "LLM_MODEL") defaultLlmModel
         LlmSystemPromptTemplate = trimmed "LLM_SYSTEM_PROMPT"
+        FfmpegVideoEncoder = defaultArg (trimmed "FFMPEG_VIDEO_ENCODER") "libx264"
+        FfmpegVaapiDevice = trimmed "FFMPEG_VAAPI_DEVICE"
+        MaxParallelVideoEncodes = max 1 (defaultArg (parseInt "MAX_PARALLEL_VIDEO_ENCODES") 1)
     }
 
 // Configuration is read once and shared; environment variables are not expected to change at runtime.

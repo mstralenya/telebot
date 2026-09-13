@@ -1,11 +1,9 @@
 module Telebot.Youtube
 
 open System
-open System.Diagnostics
 open System.IO
 open System.Linq
 open System.Threading.Tasks
-open System.Text
 open System.Text.RegularExpressions
 open System.Text.Json
 open System.Text.Json.Nodes
@@ -16,6 +14,7 @@ open Telebot.PrometheusMetrics
 open Telebot.Messages
 open Telebot.Replies
 open Telebot.Replies.Reply
+open Telebot.Ffmpeg
 open Wolverine.Attributes
 
 module Youtube =
@@ -40,34 +39,12 @@ module Youtube =
         | Some text when not (isAudioRequested text) -> getLinks youtubeRegex message
         | _ -> List.empty
 
-    let private runProcess (fileName: string) (args: string) (workingDir: string option) : int * string * string =
-        try
-            let psi = ProcessStartInfo()
-            psi.FileName <- fileName
-            psi.Arguments <- args
-            psi.RedirectStandardOutput <- true
-            psi.RedirectStandardError <- true
-            psi.UseShellExecute <- false
-            psi.CreateNoWindow <- true
-            workingDir |> Option.iter (fun d -> psi.WorkingDirectory <- d)
-            use p = new Process()
-            p.StartInfo <- psi
-            let stdout = StringBuilder()
-            let stderr = StringBuilder()
-            p.OutputDataReceived.Add(fun de -> if not (isNull de.Data) then stdout.AppendLine(de.Data) |> ignore)
-            p.ErrorDataReceived.Add(fun de -> if not (isNull de.Data) then stderr.AppendLine(de.Data) |> ignore)
-            if not (p.Start()) then
-                (-1, stdout.ToString(), "Failed to start process")
-            else
-                p.BeginOutputReadLine()
-                p.BeginErrorReadLine()
-                if p.WaitForExit(300000) then
-                    (p.ExitCode, stdout.ToString(), stderr.ToString())
-                else
-                    try p.Kill(true) with _ -> ()
-                    (-1, stdout.ToString(), "Process execution timed out after 5 minutes")
-        with ex ->
-            (-1, "", ex.ToString())
+    let private runProcessAsync fileName args =
+        async {
+            match! runProcessCaptureAsync fileName args 300_000 with
+            | Ok result -> return result
+            | Error error -> return -1, "", error
+        }
 
     let private bytesInMiB = 1024L * 1024L
     let private sizeLimitBytes = 50L * bytesInMiB
@@ -292,14 +269,19 @@ module Youtube =
             |> List.tryFind (fun (_,_,est) -> est |> Option.exists (fun t -> t <= sizeLimitBytes))
             |> Option.orElse (combos |> List.tryLast)
 
-    let private getJson (url: string) =
-        let args = $"-J --no-warnings --no-simulate --no-check-certificates{cookiesArg}{proxyArg()} \"{url}\""
-        let code, stdout, stderr = runProcess ytDlpExe args None
-        if code <> 0 then
-            Log.Warning("yt-dlp -J failed: {stderr}", stderr)
-            None
-        else
-            try Some (JsonNode.Parse stdout) with ex -> Log.Error(ex, "Failed to parse yt-dlp JSON"); None
+    let private getJsonAsync (url: string) =
+        async {
+            let args = $"-J --no-warnings --no-simulate --no-check-certificates{cookiesArg}{proxyArg()} \"{url}\""
+            let! code, stdout, stderr = runProcessAsync ytDlpExe args
+            if code <> 0 then
+                Log.Warning("yt-dlp -J failed: {stderr}", stderr)
+                return None
+            else
+                try return Some (JsonNode.Parse stdout)
+                with ex ->
+                    Log.Error(ex, "Failed to parse yt-dlp JSON")
+                    return None
+        }
 
     let private safeDelete (path: string) =
         try
@@ -350,70 +332,72 @@ module Youtube =
             | None -> ()
         with ex -> Log.Warning(ex, "CleanupArtifacts encountered an error")
 
-    let private runYtDlpDownload (url: string) (vId: string) (aId: string) (outFile: string) : bool * string =
-        // Prefer merge to mp4; provide ffmpeg location if we know it
-        let ffmpegLocArg =
-            try
-                if File.Exists ffmpegExe then
-                    let dir = Path.GetDirectoryName(ffmpegExe)
-                    if String.IsNullOrWhiteSpace(dir) then "" else $" --ffmpeg-location \"{dir}\""
-                else ""
-            with _ -> ""
-        let args = $"-f {vId}+{aId} --merge-output-format mp4{ffmpegLocArg}{cookiesArg}{proxyArg()} -o \"{outFile}\" \"{url}\""
-        let code1, _o1, e1 = runProcess ytDlpExe args None
-        // Helper to try manual merge if yt-dlp left separate files like out.f398.mp4 and out.f139.m4a
-        let tryManualMerge () =
-            try
-                let dir = Path.GetDirectoryName(outFile)
-                let dir = if String.IsNullOrWhiteSpace(dir) then Directory.GetCurrentDirectory() else dir
-                let baseNameNoExt = Path.GetFileNameWithoutExtension(outFile)
-                let candidates = Directory.GetFiles(dir, baseNameNoExt + ".f*.*")
-                let vPath = candidates |> Array.tryFind _.Contains($".f{vId}")
-                let aPath = candidates |> Array.tryFind _.Contains($".f{aId}")
-                match vPath, aPath with
-                | Some vp, Some ap ->
-                    let ffArgs = $"-y -i \"{vp}\" -i \"{ap}\" -c:v copy -c:a copy -movflags +faststart \"{outFile}\""
-                    let c, _o, e = runProcess ffmpegExe ffArgs None
-                    if c = 0 && File.Exists outFile then
-                        // Cleanup parts
-                        try File.Delete(vp) with _ -> ()
-                        try File.Delete(ap) with _ -> ()
-                        true
-                    else
-                        Log.Error("Manual ffmpeg merge failed: {err}", e)
-                        false
-                | _ -> false
-            with ex ->
-                Log.Error(ex, "Error while attempting manual merge of yt-dlp parts")
-                false
-        if code1 = 0 && File.Exists outFile then true, outFile
-        else if File.Exists outFile then true, outFile
-        else
-            // If yt-dlp succeeded but left parts due to missing ffmpeg, try manual merge
-            let merged = tryManualMerge ()
-            if merged && File.Exists outFile then true, outFile
-            else
-                Log.Warning("yt-dlp merge failed or file missing, trying recode to mp4: {err}", e1)
-                let tmpName = Path.ChangeExtension(outFile, ".temp.mp4")
-                let args2 = $"-f {vId}+{aId} --recode-video mp4{ffmpegLocArg}{cookiesArg}{proxyArg()} -o \"{tmpName}\" \"{url}\""
-                let code2, _o2, e2 = runProcess ytDlpExe args2 None
-                if code2 = 0 && File.Exists tmpName then
+    let private runYtDlpDownloadAsync (url: string) (vId: string) (aId: string) (outFile: string) =
+        async {
+            // Prefer merge to mp4; provide ffmpeg location if we know it
+            let ffmpegLocArg =
+                try
+                    if File.Exists ffmpegExe then
+                        let dir = Path.GetDirectoryName(ffmpegExe)
+                        if String.IsNullOrWhiteSpace(dir) then "" else $" --ffmpeg-location \"{dir}\""
+                    else ""
+                with _ -> ""
+            let args = $"-f {vId}+{aId} --merge-output-format mp4{ffmpegLocArg}{cookiesArg}{proxyArg()} -o \"{outFile}\" \"{url}\""
+            let! code1, _o1, e1 = runProcessAsync ytDlpExe args
+            // Helper to try manual merge if yt-dlp left separate files like out.f398.mp4 and out.f139.m4a
+            let tryManualMergeAsync () =
+                async {
                     try
-                        if File.Exists outFile then File.Delete outFile
-                    with _ -> ()
-                    File.Move(tmpName, outFile, true)
-                    true, outFile
+                        let dir = Path.GetDirectoryName(outFile)
+                        let dir = if String.IsNullOrWhiteSpace(dir) then Directory.GetCurrentDirectory() else dir
+                        let baseNameNoExt = Path.GetFileNameWithoutExtension(outFile)
+                        let candidates = Directory.GetFiles(dir, baseNameNoExt + ".f*.*")
+                        let vPath = candidates |> Array.tryFind _.Contains($".f{vId}")
+                        let aPath = candidates |> Array.tryFind _.Contains($".f{aId}")
+                        match vPath, aPath with
+                        | Some vp, Some ap ->
+                            let ffArgs = $"-y -i \"{vp}\" -i \"{ap}\" -c:v copy -c:a copy -movflags +faststart \"{outFile}\""
+                            let! c, _o, e = runProcessAsync ffmpegExe ffArgs
+                            if c = 0 && File.Exists outFile then
+                                try File.Delete(vp) with _ -> ()
+                                try File.Delete(ap) with _ -> ()
+                                return true
+                            else
+                                Log.Error("Manual ffmpeg merge failed: {err}", e)
+                                return false
+                        | _ -> return false
+                    with ex ->
+                        Log.Error(ex, "Error while attempting manual merge of yt-dlp parts")
+                        return false
+                }
+
+            if code1 = 0 && File.Exists outFile then return true, outFile
+            elif File.Exists outFile then return true, outFile
+            else
+                let! merged = tryManualMergeAsync ()
+                if merged && File.Exists outFile then return true, outFile
                 else
-                    Log.Error("yt-dlp recode failed: {err}", e2)
-                    // Cleanup tmp and any parts
-                    try safeDelete tmpName with _ -> ()
-                    cleanupArtifacts outFile None (Some vId) (Some aId)
-                    false, outFile
+                    Log.Warning("yt-dlp merge failed or file missing, trying recode to mp4: {err}", e1)
+                    let tmpName = Path.ChangeExtension(outFile, ".temp.mp4")
+                    let args2 = $"-f {vId}+{aId} --recode-video mp4{ffmpegLocArg}{cookiesArg}{proxyArg()} -o \"{tmpName}\" \"{url}\""
+                    let! code2, _o2, e2 = runProcessAsync ytDlpExe args2
+                    if code2 = 0 && File.Exists tmpName then
+                        try
+                            if File.Exists outFile then File.Delete outFile
+                        with _ -> ()
+                        File.Move(tmpName, outFile, true)
+                        return true, outFile
+                    else
+                        Log.Error("yt-dlp recode failed: {err}", e2)
+                        try safeDelete tmpName with _ -> ()
+                        cleanupArtifacts outFile None (Some vId) (Some aId)
+                        return false, outFile
+        }
 
     let getYoutubeReply (url: string) =
         async {
             try
-                match getJson url with
+                match! getJsonAsync url with
                 | None ->
                     let msg = createMessage "Failed to fetch video info"
                     youtubeFailureCounter.Inc()
@@ -438,7 +422,7 @@ module Youtube =
                     | Some (v, a, est) ->
                         let fileName = $"yt_{id}_{Guid.NewGuid()}.mp4"
                         Log.Information("Downloading YouTube: {title} using v={v} a={a} est={est}", title |> Option.defaultValue "", v.format_id, a.format_id, est)
-                        let ok, path = runYtDlpDownload url v.format_id a.format_id fileName
+                        let! ok, path = runYtDlpDownloadAsync url v.format_id a.format_id fileName
                         if not ok then
                             cleanupArtifacts fileName (Some id) (Some v.format_id) (Some a.format_id)
                             let message = createMessage "Failed to download or convert video"
@@ -460,8 +444,15 @@ module Youtube =
                                         let videoBytes = max 1L (targetBytes - audioBytes)
                                         let videoKbps = max 250.0 (float videoBytes * 8.0 / 1000.0 / duration)
                                         let tmp = Path.ChangeExtension(path, ".smaller.mp4")
-                                        let ffArgs = $"-y -i \"{path}\" -c:v libx264 -b:v {videoKbps:F0}k -c:a copy -movflags +faststart \"{tmp}\""
-                                        let code, _o, e = runProcess ffmpegExe ffArgs None
+                                        let encoderArgs = videoEncoderArgs ()
+                                        let encoder = videoEncoderName ()
+                                        let filterArgs = videoFilterArgs "null"
+                                        let ffArgs = $"-y {encoderArgs} -i \"{path}\" -c:v {encoder} -b:v {videoKbps:F0}k {filterArgs} -c:a copy -movflags +faststart \"{tmp}\""
+                                        let! encodeResult = runVideoEncodeAsync ffmpegExe ffArgs 300_000
+                                        let code, _o, e =
+                                            match encodeResult with
+                                            | Ok result -> result
+                                            | Error error -> -1, "", error
                                         if code = 0 && File.Exists tmp then
                                             try File.Delete path with _ -> ()
                                             File.Move(tmp, path, true)
@@ -490,7 +481,7 @@ module Youtube =
     let getYoutubeAudioReply (url: string) =
         async {
             try
-                match getJson url with
+                match! getJsonAsync url with
                 | None ->
                     let msg = createMessage "Failed to fetch video info"
                     youtubeFailureCounter.Inc()
@@ -507,7 +498,7 @@ module Youtube =
                         let ext = defaultArg best.ext "m4a"
                         let fileName = $"yt_{id}_{Guid.NewGuid()}.{ext}"
                         let args = $"-f {best.format_id}{cookiesArg}{proxyArg()} -o \"{fileName}\" \"{url}\""
-                        let code, _o, e = runProcess ytDlpExe args None
+                        let! code, _o, e = runProcessAsync ytDlpExe args
                         if code <> 0 || not (File.Exists fileName) then
                             Log.Error("yt-dlp audio download failed: {err}", e)
                             youtubeFailureCounter.Inc()

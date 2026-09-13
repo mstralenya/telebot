@@ -126,7 +126,8 @@ let withTelemetry<'T> (context: TelemetryContext) (operation: TelemetryScope -> 
         | ex ->
             let _ = TelemetryScope.recordFailure (Some ex) scope |> TelemetryScope.logError (Some ex) "Operation failed"
             TelemetryScope.complete scope
-            return raise ex
+            System.Runtime.ExceptionServices.ExceptionDispatchInfo.Throw(ex)
+            return Unchecked.defaultof<'T>
     }
 
 // Convenience functions for common operations

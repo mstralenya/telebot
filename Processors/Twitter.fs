@@ -97,19 +97,18 @@ module Twitter =
                             let isLlmEnabled = Translation.getLlmApiUrl().IsSome
                             match config.TwitterTranslationLang with
                             | Some targetLang when isLlmEnabled ->
-                                let! mainTl =
+                                let mainTranslation =
                                     match tweet.text with
-                                    | Some txt when not (System.String.IsNullOrWhiteSpace(txt)) ->
-                                        Translation.translateTextAsync txt targetLang
+                                    | Some txt when not (System.String.IsNullOrWhiteSpace(txt)) -> Translation.translateTextAsync txt targetLang
                                     | _ -> async { return None }
-                                let! qrtTl =
-                                    match tweet.qrt with
-                                    | Some qrt ->
-                                        match qrt.text with
-                                        | Some txt when not (System.String.IsNullOrWhiteSpace(txt)) ->
-                                            Translation.translateTextAsync txt targetLang
-                                        | _ -> async { return None }
-                                    | None -> async { return None }
+
+                                let quotedTranslation =
+                                    match tweet.qrt |> Option.bind _.text with
+                                    | Some txt when not (System.String.IsNullOrWhiteSpace(txt)) -> Translation.translateTextAsync txt targetLang
+                                    | _ -> async { return None }
+
+                                let! translations = Async.Parallel [ mainTranslation; quotedTranslation ]
+                                let mainTl, qrtTl = translations[0], translations[1]
                                 
                                 let updatedQrt =
                                     tweet.qrt

@@ -13,9 +13,13 @@ services:
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
       BLACKLIST_CHAT_IDS: ${BLACKLIST_CHAT_IDS}
       BLACKLIST_USER_IDS: ${BLACKLIST_USER_IDS}
+      LLM_TRANSLATION_ENABLED: ${LLM_TRANSLATION_ENABLED:-false}
       LLM_API_TYPE: ${LLM_API_TYPE}
       LLM_API_URL: ${LLM_API_URL}
       LLM_MODEL: ${LLM_MODEL}
+      FFMPEG_VIDEO_ENCODER: ${FFMPEG_VIDEO_ENCODER:-libx264}
+      FFMPEG_VAAPI_DEVICE: ${FFMPEG_VAAPI_DEVICE:-}
+      MAX_PARALLEL_VIDEO_ENCODES: ${MAX_PARALLEL_VIDEO_ENCODES:-1}
       WEBAPP_BASE_URL: ${WEBAPP_BASE_URL}
       SQLITE_DB_PATH: "/app/data/telebot.db"
       REDIS_CONNECTION_STRING: "127.0.0.1:6379"
@@ -27,6 +31,8 @@ services:
       USE_PROXY_FOR_YOUTUBE: "false"   
     volumes:
       - telebot_data:/app/data
+    devices:
+      - /dev/dri:/dev/dri
 
   redis:
     image: redis:7-alpine
@@ -41,7 +47,7 @@ services:
     image: cloudflare/cloudflared:latest
     container_name: telebot-cloudflared
     restart: unless-stopped
-    command: tunnel --no-autoupdate run
+    command: tunnel --no-autoupdate --protocol http2 --edge-ip-version 4 run
     environment:
       TUNNEL_TOKEN: ${TUNNEL_TOKEN}
     network_mode: host

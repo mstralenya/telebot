@@ -39,7 +39,8 @@ let downloadFileAsync (url: string) (filePath: string) (useProxy: bool) : Async<
             with
             | ex ->
                 TelemetryScope.logError (Some ex) $"Failed to download file from {url}" scope
-                raise ex
+                System.Runtime.ExceptionServices.ExceptionDispatchInfo.Throw(ex)
+                return ()
         }
     )
 // Download media with better async handling
@@ -87,15 +88,21 @@ let downloadMediaWithAudioAsync (url: string) (audioUrl: string option) (isVideo
 
                 let ffmpegArgs = sprintf "-y -v error -i \"%s\" -i \"%s\" -c:v copy -c:a aac \"%s\"" videoFile audioFile finalFile
 
+                let fallbackToVideoAsync reason =
+                    async {
+                        TelemetryScope.logError None reason scope
+                        if not (File.Exists videoFile) then
+                            return raise (FileNotFoundException("Downloaded video disappeared before FFmpeg fallback", videoFile))
+                        File.Move(videoFile, finalFile, true)
+                        do! ensureVideoHasAudioAsync finalFile
+                    }
+
                 match! runProcessCaptureAsync "ffmpeg" ffmpegArgs ffmpegTimeoutMs with
                 | Error msg ->
-                    TelemetryScope.logError None $"Failed to merge audio: {msg}" scope
+                    do! fallbackToVideoAsync $"Failed to merge audio: {msg}"
                 | Ok (mergeExitCode, _, error) ->
                     if mergeExitCode <> 0 then
-                        TelemetryScope.logError None $"Failed to merge audio. ffmpeg error: {error}" scope
-                        // Fallback to ensuring audio on the video file if merge fails
-                        File.Move(videoFile, finalFile)
-                        do! ensureVideoHasAudioAsync finalFile
+                        do! fallbackToVideoAsync $"Failed to merge audio. ffmpeg error: {error}"
                     else
                         TelemetryScope.logInfo "Video and audio merged successfully" scope
                 
@@ -115,7 +122,7 @@ let deleteFileAsync (filePath: string) : Async<unit> =
                 TelemetryScope.addProperty "file_path" filePath scope |> ignore
 
                 if File.Exists filePath then
-                    do! Task.Run(fun () -> File.Delete filePath) |> Async.AwaitTask
+                    File.Delete filePath
                     deleteCounter.Inc()
                     TelemetryScope.logInfo $"File deleted successfully: {filePath}" scope
                 else
@@ -123,7 +130,8 @@ let deleteFileAsync (filePath: string) : Async<unit> =
             with
             | ex ->
                 TelemetryScope.logError (Some ex) $"Failed to delete file: {filePath}" scope
-                raise ex
+                System.Runtime.ExceptionServices.ExceptionDispatchInfo.Throw(ex)
+                return ()
         }
     )
 
@@ -188,14 +196,14 @@ let shrinkVideoIfNeededAsync (videoPath: string) : Async<string> =
 
                                 TelemetryScope.logInfo $"Calculated video bitrate: {videoBitrate} bps, audio: {audioBitrate} bps, scale: {scaleFilter}" scope
 
-                                sprintf "-y -v error -i \"%s\" -c:v libx264 -b:v %.0f -maxrate %.0f -bufsize %.0f -vf \"%s\" -c:a aac -b:a %.0f -movflags +faststart \"%s\""
-                                    videoPath videoBitrate videoBitrate (videoBitrate * 2.0) scaleFilter audioBitrate tempFile
+                                sprintf "-y -v error %s -i \"%s\" -c:v %s -b:v %.0f -maxrate %.0f -bufsize %.0f %s -c:a aac -b:a %.0f -movflags +faststart \"%s\""
+                                    (videoEncoderArgs ()) videoPath (videoEncoderName ()) videoBitrate videoBitrate (videoBitrate * 2.0) (videoFilterArgs scaleFilter) audioBitrate tempFile
                             | _ ->
                                 TelemetryScope.logWarning "Video duration not found. Falling back to default CRF-based compression." scope
-                                sprintf "-y -v error -i \"%s\" -c:v libx264 -crf 28 -preset fast -c:a aac -b:a 128k -movflags +faststart \"%s\""
-                                    videoPath tempFile
+                                sprintf "-y -v error %s -i \"%s\" -c:v %s %s -c:a aac -b:a 128k -movflags +faststart \"%s\""
+                                    (videoEncoderArgs ()) videoPath (videoEncoderName ()) (videoQualityArgs 28 "fast") tempFile
 
-                        match! runProcessCaptureAsync "ffmpeg" ffmpegArgs ffmpegTimeoutMs with
+                        match! runVideoEncodeAsync "ffmpeg" ffmpegArgs ffmpegTimeoutMs with
                         | Error msg ->
                             TelemetryScope.logError None $"Failed to shrink video: {msg}" scope
                         | Ok (shrinkExitCode, _, error) ->
