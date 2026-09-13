@@ -91,5 +91,6 @@ jobs:
         if: ${{ github.event_name != 'pull_request' && github.ref == 'refs/heads/master' }}
         run: |
           docker run --rm -i -v /data/stacks/telebot:/stack alpine sh -c 'cat > /stack/compose.yaml' < deploy/compose.yaml
-          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v /data/stacks/telebot:/stack docker:cli docker compose -f /stack/compose.yaml pull
-          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v /data/stacks/telebot:/stack docker:cli docker compose --env-file /stack/.env -f /stack/compose.yaml up -d
+          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock docker:cli docker pull ${{ secrets.DOCKER_USERNAME }}/telebot:${{ steps.ver.outputs.version }}
+          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock docker:cli docker tag ${{ secrets.DOCKER_USERNAME }}/telebot:${{ steps.ver.outputs.version }} mstralenya/telebot:master
+          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v /data/stacks/telebot:/stack docker:cli docker compose --env-file /stack/.env -f /stack/compose.yaml up -d --force-recreate --pull never
