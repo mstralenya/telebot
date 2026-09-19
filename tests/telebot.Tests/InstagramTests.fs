@@ -27,6 +27,10 @@ let ``story media id converts to Instagram shortcode without precision loss`` ()
     Assert.Equal(Some "DdZrSqDE59o", mediaIdToShortcode "3988409343112617832")
 
 [<Fact>]
+let ``post shortcode converts to numeric media id without precision loss`` () =
+    Assert.Equal(Some "3989006527293304671", shortcodeToMediaId "DdbzE1KCC9f")
+
+[<Fact>]
 let ``post regex preserves carousel media index`` () =
     let url = "https://www.instagram.com/p/DdbzE1KCC9f/?img_index=18&stkn=MTQyN3owdjZzaWlqbA=="
     Assert.Equal<string list>([ url ], getLinks postRegex (Some url))
@@ -38,3 +42,29 @@ let ``post regex preserves carousel media index`` () =
 [<InlineData("https://www.instagram.com/p/DdbzE1KCC9f/?img_index=bad")>]
 let ``invalid or missing carousel media index is ignored`` (url: string) =
     Assert.Equal(None, tryGetMediaIndex url)
+
+[<Fact>]
+let ``Open Graph media parser prefers video metadata over its thumbnail`` () =
+    let html = """<meta property="og:image" content="https://cdn.example/thumb.jpg"><meta property="og:video" content="https://cdn.example/video.mp4?a=1&amp;b=2">"""
+    Assert.Equal(Some("https://cdn.example/video.mp4?a=1&b=2", true), tryGetOpenGraphMedia html)
+
+[<Fact>]
+let ``Open Graph media parser classifies image-only slides as photos`` () =
+    let html = """<meta property="og:image" content="https://cdn.example/photo.jpg">"""
+    Assert.Equal(Some("https://cdn.example/photo.jpg", false), tryGetOpenGraphMedia html)
+
+[<Fact>]
+let ``modern Instagram parser preserves carousel item media types`` () =
+    let json = """{
+      "data": { "xig_polaris_media": { "if_not_gated_logged_out": {
+        "caption": { "text": "caption" },
+        "carousel_media": [
+          { "media_type": 1, "image_versions2": { "candidates": [{ "url": "https://cdn.example/one.jpg" }] } },
+          { "media_type": 2, "video_versions": [{ "url": "https://cdn.example/two.mp4" }], "image_versions2": { "candidates": [{ "url": "https://cdn.example/two.jpg" }] } }
+        ]
+      } } }
+    }"""
+    Assert.Equal(
+        Some([ ("https://cdn.example/one.jpg", false); ("https://cdn.example/two.mp4", true) ], Some "caption"),
+        parseModernInstagramMedia json
+    )

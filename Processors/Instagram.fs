@@ -6,6 +6,7 @@ open System.Diagnostics
 open System.Net.Http
 open System.Net
 open System.Text.Json
+open System.Text.Json.Nodes
 open System.Text.RegularExpressions
 open System.Collections.Generic
 open System.Threading
@@ -26,6 +27,12 @@ open Wolverine.Attributes
 module private Constants =
     [<Literal>]
     let ApiEndpoint = "https://www.instagram.com/api/graphql"
+
+    [<Literal>]
+    let PostDocId = "27130156389949648"
+
+    [<Literal>]
+    let PostFriendlyName = "PolarisLoggedOutDesktopWWWPostRootContentQuery"
 
 module Instagram =
     type private InstagramPostType =
@@ -64,6 +71,19 @@ module Instagram =
                 remaining <- remaining / 64UL
             Some shortcode
         | _ -> None
+
+    let internal shortcodeToMediaId (shortcode: string) =
+        let alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
+        if String.IsNullOrWhiteSpace shortcode then None
+        else
+            shortcode
+            |> Seq.fold (fun state character ->
+                state
+                |> Option.bind (fun value ->
+                    let digit = alphabet.IndexOf character
+                    if digit < 0 || value > (UInt64.MaxValue - uint64 digit) / 64UL then None
+                    else Some(value * 64UL + uint64 digit))) (Some 0UL)
+            |> Option.map string
 
     let internal tryGetMediaIndex (url: string) =
         let m = Regex.Match(url, @"(?:\?|&)img_index=([0-9]+)(?:&|$)", RegexOptions.IgnoreCase)
@@ -106,6 +126,94 @@ module Instagram =
             response.Dispose()
             Log.Information $"fetched instagram data:\n {status} \n {body}"
             return JsonSerializer.Deserialize<InstagramMediaResponse>(body)
+        }
+
+    let private tryProperty (name: string) (node: JsonNode) =
+        if isNull node then None else node[name] |> Option.ofObj
+
+    let private tryString name node =
+        tryProperty name node |> Option.map _.GetValue<string>()
+
+    let private tryFirstArrayItem name node =
+        tryProperty name node
+        |> Option.bind (fun array -> array.AsArray() |> Seq.tryHead)
+
+    let private tryModernMediaItem (node: JsonNode) =
+        let mediaType =
+            tryProperty "media_type" node
+            |> Option.map _.GetValue<int>()
+            |> Option.defaultValue 1
+
+        if mediaType = 2 then
+            tryFirstArrayItem "video_versions" node
+            |> Option.bind (tryString "url")
+            |> Option.map (fun url -> url, true)
+        else
+            tryProperty "image_versions2" node
+            |> Option.bind (tryFirstArrayItem "candidates")
+            |> Option.bind (tryString "url")
+            |> Option.map (fun url -> url, false)
+
+    let internal parseModernInstagramMedia (body: string) =
+        try
+            let root = JsonNode.Parse body
+            let product =
+                root
+                |> tryProperty "data"
+                |> Option.bind (tryProperty "xig_polaris_media")
+                |> Option.bind (tryProperty "if_not_gated_logged_out")
+
+            product
+            |> Option.bind (fun media ->
+                let items =
+                    match tryProperty "carousel_media" media with
+                    | Some carousel -> carousel.AsArray() |> Seq.choose tryModernMediaItem |> Seq.toList
+                    | None -> tryModernMediaItem media |> Option.toList
+
+                if List.isEmpty items then None
+                else
+                    let caption =
+                        tryProperty "caption" media
+                        |> Option.bind (tryString "text")
+                    Some(items, caption))
+        with ex ->
+            Log.Warning(ex, "Could not parse modern Instagram media response")
+            None
+
+    let private createModernPostRequest shortcode =
+        let mediaId = shortcodeToMediaId shortcode |> Option.defaultValue shortcode
+        let lsd =
+            urlContent
+            |> List.tryFind (fun item -> item.Key = "lsd")
+            |> Option.map _.Value
+            |> Option.defaultValue ""
+        let content =
+            [ KeyValuePair("lsd", lsd)
+              KeyValuePair("fb_api_caller_class", "RelayModern")
+              KeyValuePair("fb_api_req_friendly_name", Constants.PostFriendlyName)
+              KeyValuePair("server_timestamps", "true")
+              KeyValuePair("variables", JsonSerializer.Serialize {| media_id = mediaId |})
+              KeyValuePair("doc_id", Constants.PostDocId) ]
+        let request = new HttpRequestMessage(HttpMethod.Post, Constants.ApiEndpoint)
+        request.Content <- new FormUrlEncodedContent(content)
+        headers
+        |> Seq.filter (fun item -> not (item.Key.Equals("X-FB-Friendly-Name", StringComparison.OrdinalIgnoreCase)))
+        |> Seq.iter (fun item -> request.Headers.TryAddWithoutValidation(item.Key, item.Value) |> ignore)
+        request.Headers.TryAddWithoutValidation("X-FB-Friendly-Name", Constants.PostFriendlyName) |> ignore
+        request
+
+    let private fetchModernPostMedia shortcode useProxy =
+        async {
+            try
+                use request = createModernPostRequest shortcode
+                let! response = Telebot.HttpClient.executeRequestAsync request useProxy
+                use _ = response
+                let! body = response.Content.ReadAsStringAsync() |> Async.AwaitTask
+                Log.Information("Fetched current Instagram post data for {Shortcode}: {StatusCode}", shortcode, response.StatusCode)
+                return parseModernInstagramMedia body
+            with ex ->
+                Log.Warning(ex, "Current Instagram post query failed for {Shortcode}", shortcode)
+                return None
         }
 
     let private getCaption (xdt: InstagramXdt) =
@@ -169,12 +277,18 @@ module Instagram =
             |> Option.bind _.MusicAssetInfo
             |> Option.bind _.ProgressiveDownloadUrl)
 
-    let private tryGetMediaUrlViaProxyPath (path: string) (isVideo: bool) (useProxy: bool) : Async<string option> =
-        let pattern =
-            if isVideo then
-                """<meta\s+property=["']og:video["']\s+content=["'](.*?)["']"""
-            else
-                """<meta\s+property=["']og:image["']\s+content=["'](.*?)["']"""
+    let internal tryGetOpenGraphMedia (html: string) =
+        let tryProperty propertyName =
+            let pattern = $"""<meta\s+property=["']{propertyName}["']\s+content=["'](.*?)["']"""
+            match Regex.Match(html, pattern, RegexOptions.IgnoreCase) with
+            | m when m.Success -> Some(WebUtility.HtmlDecode m.Groups.[1].Value)
+            | _ -> None
+
+        match tryProperty "og:video" with
+        | Some url -> Some(url, true)
+        | None -> tryProperty "og:image" |> Option.map (fun url -> url, false)
+
+    let private tryGetMediaViaProxyPath (path: string) (useProxy: bool) : Async<(string * bool) option> =
 
         let proxies = [
             "https://fxig.seria.moe"
@@ -195,8 +309,8 @@ module Instagram =
                     use _ = response
                     if response.IsSuccessStatusCode then
                             let! html = response.Content.ReadAsStringAsync() |> Async.AwaitTask
-                            match Regex.Match(html, pattern) with
-                            | m when m.Success -> return Some(WebUtility.HtmlDecode m.Groups.[1].Value)
+                            match tryGetOpenGraphMedia html with
+                            | Some media -> return Some media
                             | _ -> return! tryProxies rest
                         else
                             return! tryProxies rest
@@ -206,6 +320,13 @@ module Instagram =
             }
 
         tryProxies proxies
+
+    let private tryGetMediaUrlViaProxyPath (path: string) (isVideo: bool) (useProxy: bool) : Async<string option> =
+        async {
+            match! tryGetMediaViaProxyPath path useProxy with
+            | Some (url, actualIsVideo) when actualIsVideo = isVideo -> return Some url
+            | _ -> return None
+        }
 
     let private tryGetMediaUrlViaProxy (shortcode: string) (isVideo: bool) (useProxy: bool) =
         tryGetMediaUrlViaProxyPath $"/reel/{shortcode}/" isVideo useProxy
@@ -222,6 +343,31 @@ module Instagram =
 
     let private tryDownloadMediaViaProxy (shortcode: string) (isVideo: bool) (useProxy: bool) : Async<GalleryDisplay option> =
         tryDownloadMediaViaProxyPath $"/reel/{shortcode}/" isVideo useProxy
+
+    let private tryDownloadCarouselViaProxy (shortcode: string) (useProxy: bool) : Async<GalleryDisplay array> =
+        let rec resolveItems index seen resolved =
+            async {
+                if index > 20 then
+                    return List.rev resolved
+                else
+                    let path = $"/p/{shortcode}/?img_index={index}"
+                    match! tryGetMediaViaProxyPath path useProxy with
+                    | Some (url, isVideo) when not (Set.contains url seen) ->
+                        return! resolveItems (index + 1) (Set.add url seen) ((url, isVideo) :: resolved)
+                    | _ -> return List.rev resolved
+            }
+
+        async {
+            let! resolved = resolveItems 1 Set.empty []
+            if List.isEmpty resolved then
+                return [||]
+            else
+                Log.Information("Resolved {Count} indexed media items for Instagram carousel {Shortcode}", resolved.Length, shortcode)
+                return!
+                    resolved
+                    |> List.map (fun (url, isVideo) -> downloadMediaAsync url isVideo useProxy)
+                    |> Async.Parallel
+        }
 
     let private tryDownloadStoryWithYtDlp (storyUrl: string) (useProxy: bool) : Async<GalleryDisplay option> =
         async {
@@ -286,65 +432,88 @@ module Instagram =
     let private downloadPost pId mediaIndex =
         async {
             let useProxy = Telebot.HttpClient.ProxyConfig.useProxyForInstagramPosts()
-            let! media = fetchMediaData pId useProxy
+            let! modernMedia = fetchModernPostMedia pId useProxy
 
-            match media.Data |> Option.bind _.InstagramXdt with
-            | Some xdt ->
-                let! mediaItems =
-                    match xdt.EdgeSidecarToChildren with
-                    | Some { Edges = edges } when not edges.IsEmpty ->
-                        let selectedEdges =
-                            match mediaIndex with
-                            | Some index -> edges |> List.tryItem (index - 1) |> Option.toList
-                            | None -> edges
+            match modernMedia with
+            | Some (items, caption) ->
+                let selectedItems =
+                    match mediaIndex with
+                    | Some index -> items |> List.tryItem (index - 1) |> Option.toList
+                    | None -> items
 
-                        selectedEdges
-                        |> List.map (fun e ->
-                            let downloadUrl =
-                                if e.Node.IsVideo then
-                                    e.Node.VideoUrl
-                                else
-                                    e.Node.DisplayUrl
-                            
+                if List.isEmpty selectedItems then
+                    return Reply.createMessage "Instagram carousel item not found"
+                else
+                    let! downloaded =
+                        selectedItems
+                        |> List.map (fun (url, isVideo) -> downloadMediaAsync url isVideo useProxy)
+                        |> Async.Parallel
+                    return Reply.createGallery downloaded caption
+            | None ->
+                let! media = fetchMediaData pId useProxy
+                match media.Data |> Option.bind _.InstagramXdt with
+                | Some xdt ->
+                    let! mediaItems =
+                        match xdt.EdgeSidecarToChildren with
+                        | Some { Edges = edges } when not edges.IsEmpty ->
+                            let selectedEdges =
+                                match mediaIndex with
+                                | Some index -> edges |> List.tryItem (index - 1) |> Option.toList
+                                | None -> edges
+
+                            selectedEdges
+                            |> List.map (fun e ->
+                                let downloadUrl =
+                                    if e.Node.IsVideo then e.Node.VideoUrl
+                                    else e.Node.DisplayUrl
+
+                                let audioUrl =
+                                    if e.Node.IsVideo then
+                                        let url = findAudioUrl e.Node.DashInfo e.Node.ClipsMetadata
+                                        if url.IsSome then Log.Information $"Found DASH or licensed audio stream for sidecar item in post {pId}"
+                                        url
+                                    else None
+
+                                downloadMediaWithAudioAsync downloadUrl audioUrl e.Node.IsVideo useProxy)
+                            |> Async.Parallel
+                        | _ ->
+                            let url = if xdt.IsVideo then xdt.VideoUrl else xdt.ImageUrl
                             let audioUrl =
-                                if e.Node.IsVideo then
-                                    let url = findAudioUrl e.Node.DashInfo e.Node.ClipsMetadata
-                                    if url.IsSome then Log.Information $"Found DASH or licensed audio stream for sidecar item in post {pId}"
-                                    url
+                                if xdt.IsVideo then
+                                    let aUrl = findAudioUrl xdt.DashInfo xdt.ClipsMetadata
+                                    if aUrl.IsSome then Log.Information $"Found DASH or licensed audio stream for post {pId}"
+                                    aUrl
                                 else None
 
-                            downloadMediaWithAudioAsync downloadUrl audioUrl e.Node.IsVideo useProxy)
-                        |> Async.Parallel
-                    | _ ->
-                        let url = if xdt.IsVideo then xdt.VideoUrl else xdt.ImageUrl
-                        
-                        let audioUrl =
-                            if xdt.IsVideo then
-                                let aUrl = findAudioUrl xdt.DashInfo xdt.ClipsMetadata
-                                if aUrl.IsSome then Log.Information $"Found DASH or licensed audio stream for post {pId}"
-                                aUrl
-                            else None
+                            match url with
+                            | Some value -> [| downloadMediaWithAudioAsync value audioUrl xdt.IsVideo useProxy |]
+                            | None -> [||]
+                            |> Async.Parallel
 
-                        match url with
-                        | Some u -> [| downloadMediaWithAudioAsync u audioUrl xdt.IsVideo useProxy |]
-                        | None -> [||]
-                        |> Async.Parallel
-
-                return Reply.createGallery mediaItems (Some(getCaption xdt))
-            | None ->
-                Log.Information $"GraphQL query failed for post {pId}. Trying proxy fallback..."
-                let path =
-                    match mediaIndex with
-                    | Some index -> $"/p/{pId}/?img_index={index}"
-                    | None -> $"/p/{pId}/"
-                let! proxyVideo = tryDownloadMediaViaProxyPath path true useProxy
-                match proxyVideo with
-                | Some gallery -> return Reply.createGallery [| gallery |] None
+                    return Reply.createGallery mediaItems (Some(getCaption xdt))
                 | None ->
-                    let! proxyPhoto = tryDownloadMediaViaProxyPath path false useProxy
-                    match proxyPhoto with
-                    | Some gallery -> return Reply.createGallery [| gallery |] None
-                    | None -> return Reply.createMessage "Failed to download post"
+                    Log.Information $"GraphQL query failed for post {pId}. Trying proxy fallback..."
+                    match mediaIndex with
+                    | None ->
+                        let! gallery = tryDownloadCarouselViaProxy pId useProxy
+                        if not (Array.isEmpty gallery) then
+                            return Reply.createGallery gallery None
+                        else
+                            let! proxyVideo = tryDownloadMediaViaProxyPath $"/p/{pId}/" true useProxy
+                            match proxyVideo with
+                            | Some media -> return Reply.createGallery [| media |] None
+                            | None ->
+                                let! proxyPhoto = tryDownloadMediaViaProxyPath $"/p/{pId}/" false useProxy
+                                match proxyPhoto with
+                                | Some media -> return Reply.createGallery [| media |] None
+                                | None -> return Reply.createMessage "Failed to download post"
+                    | Some index ->
+                        let path = $"/p/{pId}/?img_index={index}"
+                        match! tryGetMediaViaProxyPath path useProxy with
+                        | Some (url, isVideo) ->
+                            let! media = downloadMediaAsync url isVideo useProxy
+                            return Reply.createGallery [| media |] None
+                        | None -> return Reply.createMessage "Failed to download post"
         }
 
     let private downloadStory (username: string) (mediaId: string) =
