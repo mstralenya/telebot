@@ -8,7 +8,7 @@
     <RootNamespace>Telebot</RootNamespace>
 <!--    <PublishSingleFile>true</PublishSingleFile>-->
     <SatelliteResourceLanguages>en-US</SatelliteResourceLanguages>
-    <!-- NU1608: Suave 3.4.4 pins FSharp.Core =10.0.102, but Funogram requires >=10.1.301.
+    <!-- NU1608: Suave 3.5.0 pins FSharp.Core =10.0.102, but Funogram requires >=10.1.301.
          No version satisfies both; FSharp.Core is backwards compatible at runtime, so the
          newer version is safe and the warning is intentionally suppressed. -->
     <NoWarn>$(NoWarn);NU1608</NoWarn>
@@ -50,12 +50,12 @@
   <ItemGroup>
     <PackageReference Include="Funogram" Version="3.0.5" />
     <PackageReference Include="Funogram.Telegram" Version="10.2.0" />
-    <PackageReference Include="Microsoft.Extensions.Hosting" Version="10.0.11" />
-    <PackageReference Include="Microsoft.Extensions.Http" Version="10.0.11" />
-    <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="10.0.11" />
-    <PackageReference Include="Microsoft.Extensions.Configuration" Version="10.0.11" />
-    <PackageReference Include="Microsoft.Extensions.Configuration.EnvironmentVariables" Version="10.0.11" />
-    <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.11" />
+    <PackageReference Include="Microsoft.Extensions.Hosting" Version="10.0.12" />
+    <PackageReference Include="Microsoft.Extensions.Http" Version="10.0.12" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="10.0.12" />
+    <PackageReference Include="Microsoft.Extensions.Configuration" Version="10.0.12" />
+    <PackageReference Include="Microsoft.Extensions.Configuration.EnvironmentVariables" Version="10.0.12" />
+    <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.12" />
     <PackageReference Include="SQLitePCLRaw.bundle_e_sqlite3" Version="3.0.5" />
     <PackageReference Include="prometheus-net" Version="8.2.1" />
     <PackageReference Include="prometheus-net.AspNetCore" Version="8.2.1" />
@@ -67,12 +67,12 @@
     <PackageReference Include="Serilog.Enrichers.Process" Version="3.0.0" />
     <PackageReference Include="Serilog.Enrichers.Thread" Version="4.0.0" />
     <PackageReference Include="Serilog.Settings.Configuration" Version="10.0.1" />
-    <PackageReference Include="Suave" Version="3.4.4" />
+    <PackageReference Include="Suave" Version="3.5.0" />
     <PackageReference Include="FSharp.SystemTextJson" Version="1.4.36" />
-    <PackageReference Include="WolverineFx" Version="6.29.2" />
-    <PackageReference Include="WolverineFx.Redis" Version="6.29.2" />
-    <PackageReference Include="WolverineFx.RuntimeCompilation" Version="6.29.2" />
-    <PackageReference Update="FSharp.Core" Version="10.1.400" />
+    <PackageReference Include="WolverineFx" Version="6.39.0" />
+    <PackageReference Include="WolverineFx.Redis" Version="6.39.0" />
+    <PackageReference Include="WolverineFx.RuntimeCompilation" Version="6.39.0" />
+    <PackageReference Update="FSharp.Core" Version="10.1.401" />
   </ItemGroup>
 
 </Project>

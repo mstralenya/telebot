@@ -26,6 +26,7 @@ services:
       PROXY_URL: "http://127.0.0.1:8888"
       USE_PROXY_FOR_INSTAGRAM_REELS: "true"
       USE_PROXY_FOR_INSTAGRAM_POSTS: "false"             
+      INSTAGRAM_COOKIES_PATH: ${INSTAGRAM_COOKIES_PATH:-/app/data/instagram-cookies.txt}
       USE_PROXY_FOR_TIKTOK: "false"
       USE_PROXY_FOR_TWITTER: "false"
       USE_PROXY_FOR_YOUTUBE: "false"   

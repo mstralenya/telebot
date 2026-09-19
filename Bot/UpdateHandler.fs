@@ -71,7 +71,10 @@ let private stripHtml (html: string) : string =
             .Trim()
 
 let private hasSupportedLinks (text: string option) =
-    let ig = getLinks Instagram.Instagram.postRegex text @ getLinks Instagram.Instagram.shareRegex text
+    let ig =
+        getLinks Instagram.Instagram.postRegex text
+        @ getLinks Instagram.Instagram.shareRegex text
+        @ getLinks Instagram.Instagram.storyRegex text
     let tw = getLinks Twitter.Twitter.twitterRegex text
     let tt = getLinks TikTok.TikTok.tikTokRegex text
     let yt = getLinks Youtube.Youtube.youtubeRegex text

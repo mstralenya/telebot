@@ -4,6 +4,7 @@ open System
 open System.IO
 open System.Diagnostics
 open System.Net.Http
+open System.Net
 open System.Text.Json
 open System.Text.RegularExpressions
 open System.Collections.Generic
@@ -29,7 +30,8 @@ module private Constants =
 module Instagram =
     type private InstagramPostType =
         | Reel of string
-        | Post of string
+        | Post of string * mediaIndex: int option
+        | Story of username: string * mediaId: string
         | Nothing
 
     let private loadJson<'T> path =
@@ -39,19 +41,48 @@ module Instagram =
     let private urlContent = loadJson<KeyValuePair<string, string> list> "igUrlContent.json"
 
     let postRegex =
-        Regex(@"https://www\.instagram\.com/(?:reel?|p)/([\w-]+)/?", RegexOptions.Compiled)
+        Regex(@"https://www\.instagram\.com/(?:reel?|p)/([\w-]+)/?(?:\?[^\s]*)?", RegexOptions.Compiled)
 
     let shareRegex =
         Regex(@"https://www\.instagram\.com/share/(?:reel/)?([a-zA-Z0-9_/-]+)/?", RegexOptions.Compiled)
 
+    let storyRegex =
+        Regex(
+            @"https://(?:www\.)?instagram\.com/stories/(?!highlights(?:/|$))([a-zA-Z0-9._]+)/([0-9]+)/?(?:\?[^\s]*)?",
+            RegexOptions.Compiled ||| RegexOptions.IgnoreCase
+        )
+
+    let internal mediaIdToShortcode (mediaId: string) =
+        let alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
+        match UInt64.TryParse mediaId with
+        | true, 0UL -> Some "A"
+        | true, value ->
+            let mutable remaining = value
+            let mutable shortcode = ""
+            while remaining > 0UL do
+                shortcode <- string alphabet.[int (remaining % 64UL)] + shortcode
+                remaining <- remaining / 64UL
+            Some shortcode
+        | _ -> None
+
+    let internal tryGetMediaIndex (url: string) =
+        let m = Regex.Match(url, @"(?:\?|&)img_index=([0-9]+)(?:&|$)", RegexOptions.IgnoreCase)
+        match m.Success, Int32.TryParse m.Groups.[1].Value with
+        | true, (true, index) when index > 0 -> Some index
+        | _ -> None
+
     let private (|PostType|_|) url =
-        postRegex.Match(url).Groups
-        |> Seq.tryLast
-        |> Option.map _.Value
-        |> function
-            | Some id when url.Contains "/reel" -> id |> Reel |> Some
-            | Some id -> id |> Post |> Some
-            | _ -> None
+        let storyMatch = storyRegex.Match url
+        if storyMatch.Success then
+            Some(Story(storyMatch.Groups.[1].Value, storyMatch.Groups.[2].Value))
+        else
+            postRegex.Match(url).Groups
+            |> Seq.tryLast
+            |> Option.map _.Value
+            |> function
+                | Some id when url.Contains "/reel" -> id |> Reel |> Some
+                | Some id -> Post(id, tryGetMediaIndex url) |> Some
+                | _ -> None
 
     let private getContentPostId postId =
         KeyValuePair("variables", JsonSerializer.Serialize {| shortcode = postId; |})
@@ -138,7 +169,7 @@ module Instagram =
             |> Option.bind _.MusicAssetInfo
             |> Option.bind _.ProgressiveDownloadUrl)
 
-    let private tryGetMediaUrlViaProxy (shortcode: string) (isVideo: bool) (useProxy: bool) : Async<string option> =
+    let private tryGetMediaUrlViaProxyPath (path: string) (isVideo: bool) (useProxy: bool) : Async<string option> =
         let pattern =
             if isVideo then
                 """<meta\s+property=["']og:video["']\s+content=["'](.*?)["']"""
@@ -157,7 +188,7 @@ module Instagram =
                 | [] -> return None
                 | proxyBase :: rest ->
                 try
-                    use request = new HttpRequestMessage(HttpMethod.Get, $"{proxyBase}/reel/{shortcode}/")
+                    use request = new HttpRequestMessage(HttpMethod.Get, $"{proxyBase}{path}")
                     request.Headers.TryAddWithoutValidation("User-Agent", "TelegramBot (like TwitterBot)") |> ignore
 
                     let! response = Telebot.HttpClient.executeRequestAsync request useProxy
@@ -165,7 +196,7 @@ module Instagram =
                     if response.IsSuccessStatusCode then
                             let! html = response.Content.ReadAsStringAsync() |> Async.AwaitTask
                             match Regex.Match(html, pattern) with
-                            | m when m.Success -> return Some m.Groups.[1].Value
+                            | m when m.Success -> return Some(WebUtility.HtmlDecode m.Groups.[1].Value)
                             | _ -> return! tryProxies rest
                         else
                             return! tryProxies rest
@@ -176,14 +207,55 @@ module Instagram =
 
         tryProxies proxies
 
-    let private tryDownloadMediaViaProxy (shortcode: string) (isVideo: bool) (useProxy: bool) : Async<GalleryDisplay option> =
+    let private tryGetMediaUrlViaProxy (shortcode: string) (isVideo: bool) (useProxy: bool) =
+        tryGetMediaUrlViaProxyPath $"/reel/{shortcode}/" isVideo useProxy
+
+    let private tryDownloadMediaViaProxyPath (path: string) (isVideo: bool) (useProxy: bool) : Async<GalleryDisplay option> =
         async {
-            let! mediaUrlOpt = tryGetMediaUrlViaProxy shortcode isVideo useProxy
+            let! mediaUrlOpt = tryGetMediaUrlViaProxyPath path isVideo useProxy
             match mediaUrlOpt with
             | Some mediaUrl ->
                 let! gallery = downloadMediaAsync mediaUrl isVideo useProxy
                 return Some gallery
             | None -> return None
+        }
+
+    let private tryDownloadMediaViaProxy (shortcode: string) (isVideo: bool) (useProxy: bool) : Async<GalleryDisplay option> =
+        tryDownloadMediaViaProxyPath $"/reel/{shortcode}/" isVideo useProxy
+
+    let private tryDownloadStoryWithYtDlp (storyUrl: string) (useProxy: bool) : Async<GalleryDisplay option> =
+        async {
+            match Config.get().InstagramCookiesPath with
+            | None -> return None
+            | Some cookiesPath ->
+                let outputBase = $"ig_story_{Guid.NewGuid():N}"
+                let outputTemplate = $"{outputBase}.%%(ext)s"
+                let proxyArg =
+                    if useProxy then
+                        Telebot.HttpClient.ProxyConfig.getProxyUrl()
+                        |> Option.map (fun proxy -> $" --proxy \"{proxy}\"")
+                        |> Option.defaultValue ""
+                    else ""
+                let args =
+                    $"--no-playlist --no-warnings --cookies \"{cookiesPath}\"{proxyArg} --print after_move:filepath -o \"{outputTemplate}\" \"{storyUrl}\""
+
+                match! runProcessCaptureAsync "yt-dlp" args 120_000 with
+                | Ok (0, stdout, _) ->
+                    let outputPath =
+                        stdout.Split([|'\r'; '\n'|], StringSplitOptions.RemoveEmptyEntries)
+                        |> Array.tryLast
+                    match outputPath with
+                    | Some path when File.Exists path ->
+                        let extension = Path.GetExtension(path).ToLowerInvariant()
+                        let isVideo = [ ".mp4"; ".webm"; ".mkv"; ".mov" ] |> List.contains extension
+                        return Some(if isVideo then Video path else Photo path)
+                    | _ -> return None
+                | Ok (_, _, stderr) ->
+                    Log.Warning("yt-dlp could not download Instagram story {StoryUrl}: {Error}", storyUrl, stderr)
+                    return None
+                | Error error ->
+                    Log.Warning("Could not run yt-dlp for Instagram story {StoryUrl}: {Error}", storyUrl, error)
+                    return None
         }
 
     let private downloadReel rId =
@@ -211,7 +283,7 @@ module Instagram =
                 | None -> return Reply.createMessage "Failed to download reel"
         }
 
-    let private downloadPost pId =
+    let private downloadPost pId mediaIndex =
         async {
             let useProxy = Telebot.HttpClient.ProxyConfig.useProxyForInstagramPosts()
             let! media = fetchMediaData pId useProxy
@@ -221,7 +293,12 @@ module Instagram =
                 let! mediaItems =
                     match xdt.EdgeSidecarToChildren with
                     | Some { Edges = edges } when not edges.IsEmpty ->
-                        edges
+                        let selectedEdges =
+                            match mediaIndex with
+                            | Some index -> edges |> List.tryItem (index - 1) |> Option.toList
+                            | None -> edges
+
+                        selectedEdges
                         |> List.map (fun e ->
                             let downloadUrl =
                                 if e.Node.IsVideo then
@@ -256,14 +333,70 @@ module Instagram =
                 return Reply.createGallery mediaItems (Some(getCaption xdt))
             | None ->
                 Log.Information $"GraphQL query failed for post {pId}. Trying proxy fallback..."
-                let! proxyVideo = tryDownloadMediaViaProxy pId true useProxy
+                let path =
+                    match mediaIndex with
+                    | Some index -> $"/p/{pId}/?img_index={index}"
+                    | None -> $"/p/{pId}/"
+                let! proxyVideo = tryDownloadMediaViaProxyPath path true useProxy
                 match proxyVideo with
                 | Some gallery -> return Reply.createGallery [| gallery |] None
                 | None ->
-                    let! proxyPhoto = tryDownloadMediaViaProxy pId false useProxy
+                    let! proxyPhoto = tryDownloadMediaViaProxyPath path false useProxy
                     match proxyPhoto with
                     | Some gallery -> return Reply.createGallery [| gallery |] None
                     | None -> return Reply.createMessage "Failed to download post"
+        }
+
+    let private downloadStory (username: string) (mediaId: string) =
+        async {
+            let useProxy = Telebot.HttpClient.ProxyConfig.useProxyForInstagramReels()
+
+            let downloadViaProxy () =
+                async {
+                    let canonicalUrl = $"https://www.instagram.com/stories/{username}/{mediaId}/"
+                    let! ytDlpMedia = tryDownloadStoryWithYtDlp canonicalUrl useProxy
+                    match ytDlpMedia with
+                    | Some gallery -> return Reply.createGallery [| gallery |] None
+                    | None ->
+                        Log.Information("Trying proxy fallback for Instagram story {StoryId}...", mediaId)
+                        let path = $"/stories/{username}/{mediaId}/"
+                        let! proxyVideoUrl = tryGetMediaUrlViaProxyPath path true useProxy
+                        match proxyVideoUrl with
+                        | Some url ->
+                            let! gallery = downloadMediaAsync url true useProxy
+                            return Reply.createGallery [| gallery |] None
+                        | None ->
+                            let! proxyImageUrl = tryGetMediaUrlViaProxyPath path false useProxy
+                            match proxyImageUrl with
+                            | Some url ->
+                                let! gallery = downloadMediaAsync url false useProxy
+                                return Reply.createGallery [| gallery |] None
+                            | None -> return Reply.createMessage "Failed to download story (it may have expired or require Instagram cookies)"
+                }
+
+            let! graphqlMedia =
+                async {
+                    try
+                        match mediaIdToShortcode mediaId with
+                        | Some shortcode ->
+                            let! media = fetchMediaData shortcode useProxy
+                            return media.Data |> Option.bind _.InstagramXdt
+                        | None -> return None
+                    with ex ->
+                        Log.Warning(ex, "Could not resolve Instagram story {StoryId} through GraphQL", mediaId)
+                        return None
+                }
+
+            match graphqlMedia with
+            | Some xdt ->
+                let mediaUrl = if xdt.IsVideo then xdt.VideoUrl else xdt.ImageUrl
+                match mediaUrl with
+                | Some url ->
+                    let audioUrl = if xdt.IsVideo then findAudioUrl xdt.DashInfo xdt.ClipsMetadata else None
+                    let! gallery = downloadMediaWithAudioAsync url audioUrl xdt.IsVideo useProxy
+                    return Reply.createGallery [| gallery |] None
+                | None -> return! downloadViaProxy ()
+            | None -> return! downloadViaProxy ()
         }
 
     let getInstagramReplyAsync url =
@@ -273,8 +406,11 @@ module Instagram =
                 | PostType(Reel id) ->
                     let! res = downloadReel id
                     return Success res
-                | PostType(Post id) ->
-                    let! res = downloadPost id
+                | PostType(Post(id, mediaIndex)) ->
+                    let! res = downloadPost id mediaIndex
+                    return Success res
+                | PostType(Story(username, mediaId)) ->
+                    let! res = downloadStory username mediaId
                     return Success res
                 | _ -> return InvalidUrl
             with
@@ -355,14 +491,24 @@ module Instagram =
                         | Choice1Of2 audioPath -> return Some (Reply.createAudioFile audioPath)
                         | Choice2Of2 msg -> return Some (Reply.createMessage msg)
                     | None -> return Some (Reply.createMessage "Failed to find video for reel")
-                | PostType(Post id) ->
+                | PostType(Post(id, mediaIndex)) ->
                     let useProxy = Telebot.HttpClient.ProxyConfig.useProxyForInstagramPosts()
                     let! media = fetchMediaData id useProxy
                     let! videoUrlOpt =
                         async {
-                            match media.Data |> Option.bind _.InstagramXdt with
-                            | Some xdt when xdt.IsVideo -> return xdt.VideoUrl
-                            | _ -> return! tryGetMediaUrlViaProxy id true useProxy
+                            let xdt = media.Data |> Option.bind _.InstagramXdt
+                            match xdt, mediaIndex with
+                            | Some post, Some index ->
+                                match post.EdgeSidecarToChildren |> Option.bind (fun sidecar -> sidecar.Edges |> List.tryItem (index - 1)) with
+                                | Some edge when edge.Node.IsVideo -> return Some edge.Node.VideoUrl
+                                | _ -> return None
+                            | Some xdt, _ when xdt.IsVideo -> return xdt.VideoUrl
+                            | _ ->
+                                let path =
+                                    match mediaIndex with
+                                    | Some index -> $"/p/{id}/?img_index={index}"
+                                    | None -> $"/p/{id}/"
+                                return! tryGetMediaUrlViaProxyPath path true useProxy
                         }
                     match videoUrlOpt with
                     | Some vurl ->
@@ -380,6 +526,7 @@ type InstagramLinksHandler() =
     inherit BaseHandler()
     member private this.getInstagramShareLinks (message: string option) = getLinks Instagram.shareRegex message
     member private this.getInstagramLinks (message: string option) = getLinks Instagram.postRegex message
+    member private this.getInstagramStoryLinks (message: string option) = getLinks Instagram.storyRegex message
     member private this.getInstagramAudioLinks (message: string option) =
         match message with
         | Some text when text.IndexOf("audio", StringComparison.OrdinalIgnoreCase) >= 0 -> getLinks Instagram.postRegex message
@@ -396,9 +543,11 @@ type InstagramLinksHandler() =
         createLinkExtractor this.getInstagramAudioLinks InstagramAudioMessage
     member private this.extractInstagramVideoLinks =
         createLinkExtractor this.getInstagramVideoLinks InstagramMessage
+    member private this.extractInstagramStoryLinks =
+        createLinkExtractor this.getInstagramStoryLinks InstagramMessage
     [<WolverineHandler>]
     member this.HandleLinks(msg: UpdateMessage) : Task =
-        let links = this.extractInstagramVideoLinks msg
+        let links = this.extractInstagramVideoLinks msg @ this.extractInstagramStoryLinks msg
         task {
             for message in links do
                 do! publishToBusAsync message |> Async.StartAsTask

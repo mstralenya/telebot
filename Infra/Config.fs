@@ -40,6 +40,7 @@ type AppConfig = {
     RedisConnectionString: string
     SqliteDbPath: string
     YoutubeCookiesPath: string option
+    InstagramCookiesPath: string option
     /// Maximum number of bus messages processed concurrently by this node
     MaxParallelMessages: int
     BlacklistedChatIds: Set<int64>
@@ -103,6 +104,22 @@ let private resolveYoutubeCookiesPath () =
         Log.Error(ex, "Error resolving cookies for yt-dlp")
         None
 
+let private resolveInstagramCookiesPath () =
+    try
+        match trimmed "INSTAGRAM_COOKIES_PATH" with
+        | Some envPath when File.Exists envPath ->
+            Log.Information("Using Instagram cookies from INSTAGRAM_COOKIES_PATH: {Path}", envPath)
+            Some envPath
+        | _ ->
+            candidateSearchDirs ()
+            |> Seq.collect (fun dir ->
+                [ Path.Combine(dir, "instagram-cookies.txt")
+                  Path.Combine(dir, "cookies.txt") ])
+            |> Seq.tryFind File.Exists
+    with ex ->
+        Log.Error(ex, "Error resolving Instagram cookies for yt-dlp")
+        None
+
 let private load () : AppConfig =
     let twitterApiBase =
         match trimmed "TWITTER_API_BASE" with
@@ -118,6 +135,7 @@ let private load () : AppConfig =
                 (defaultArg (trimmed "REDIS_URL") defaultRedisConnectionString)
         SqliteDbPath = defaultArg (trimmed "SQLITE_DB_PATH") defaultSqliteDbPath
         YoutubeCookiesPath = resolveYoutubeCookiesPath ()
+        InstagramCookiesPath = resolveInstagramCookiesPath ()
         MaxParallelMessages = defaultArg (parseInt "MAX_PARALLEL_MESSAGES") 5
         BlacklistedChatIds = parseIdSet "BLACKLIST_CHAT_IDS"
         BlacklistedUserIds = parseIdSet "BLACKLIST_USER_IDS"

@@ -12,6 +12,7 @@
 
   <ItemGroup>
     <Compile Include="BusSerializationTests.fs" />
+    <Compile Include="InstagramTests.fs" />
     <Compile Include="TranslationTests.fs" />
     <Compile Include="YoutubeTests.fs" />
     <Compile Include="RepliesTests.fs" />
@@ -20,11 +21,11 @@
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.10.1" />
     <PackageReference Include="xunit" Version="2.9.3" />
     <PackageReference Include="FSharp.SystemTextJson" Version="1.4.36" />
-    <PackageReference Update="FSharp.Core" Version="10.1.400" />
-    <PackageReference Include="xunit.runner.visualstudio" Version="3.1.0">
+    <PackageReference Update="FSharp.Core" Version="10.1.401" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="4.0.0">
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
       <PrivateAssets>all</PrivateAssets>
     </PackageReference>
