@@ -53,6 +53,12 @@ let ``Open Graph media parser classifies image-only slides as photos`` () =
     let html = """<meta property="og:image" content="https://cdn.example/photo.jpg">"""
     Assert.Equal(Some("https://cdn.example/photo.jpg", false), tryGetOpenGraphMedia html)
 
+[<Theory>]
+[<InlineData("/videos/abc/1", "https://eeinstagram.com/videos/abc/1")>]
+[<InlineData("https://cdn.example/video.mp4", "https://cdn.example/video.mp4")>]
+let ``proxy media URLs resolve relative to their source`` (mediaUrl: string) (expected: string) =
+    Assert.Equal(expected, resolveMediaUrl "https://eeinstagram.com" mediaUrl)
+
 [<Fact>]
 let ``modern Instagram parser preserves carousel item media types`` () =
     let json = """{
@@ -68,3 +74,16 @@ let ``modern Instagram parser preserves carousel item media types`` () =
         Some([ ("https://cdn.example/one.jpg", false); ("https://cdn.example/two.mp4", true) ], Some "caption"),
         parseModernInstagramMedia json
     )
+
+[<Theory>]
+[<InlineData("")>]
+[<InlineData("   ")>]
+[<InlineData("<html>rate limited</html>")>]
+let ``legacy Instagram parser rejects empty and non-JSON responses`` (body: string) =
+    Assert.Equal(None, tryParseInstagramMediaResponse body)
+
+[<Fact>]
+let ``legacy Instagram parser accepts an empty data response`` () =
+    let parsed = tryParseInstagramMediaResponse "{\"data\":null}"
+    Assert.True(parsed.IsSome)
+    Assert.Equal(None, parsed.Value.Data)

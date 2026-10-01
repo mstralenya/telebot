@@ -116,16 +116,44 @@ module Instagram =
         Log.Information $"created instagram request {JsonSerializer.Serialize request}"
         request
 
+    let internal tryParseInstagramMediaResponse (body: string) =
+        if String.IsNullOrWhiteSpace body then
+            None
+        else
+            try
+                JsonSerializer.Deserialize<InstagramMediaResponse>(body)
+                |> Option.ofObj
+            with ex ->
+                Log.Warning(ex, "Could not parse legacy Instagram media response")
+                None
+
+    let private emptyMediaResponse : InstagramMediaResponse = { Data = None }
+
     let private fetchMediaData postId useProxy =
         async {
             use request = createRequest postId
             let! response = Telebot.HttpClient.executeRequestAsync request useProxy
+            use _ = response
             let cancellationToken = CancellationToken.None
             let! body = response.Content.ReadAsStringAsync cancellationToken |> Async.AwaitTask
-            let status = response.StatusCode
-            response.Dispose()
-            Log.Information $"fetched instagram data:\n {status} \n {body}"
-            return JsonSerializer.Deserialize<InstagramMediaResponse>(body)
+            Log.Information(
+                "Fetched legacy Instagram data for {Shortcode}: {StatusCode}, {BodyLength} bytes",
+                postId,
+                response.StatusCode,
+                body.Length
+            )
+
+            if not response.IsSuccessStatusCode then
+                Log.Warning(
+                    "Legacy Instagram query failed for {Shortcode}: {StatusCode}; trying fallback",
+                    postId,
+                    response.StatusCode
+                )
+                return emptyMediaResponse
+            else
+                match tryParseInstagramMediaResponse body with
+                | Some media -> return media
+                | None -> return emptyMediaResponse
         }
 
     let private tryProperty (name: string) (node: JsonNode) =
@@ -288,12 +316,17 @@ module Instagram =
         | Some url -> Some(url, true)
         | None -> tryProperty "og:image" |> Option.map (fun url -> url, false)
 
+    let internal resolveMediaUrl (proxyBase: string) (mediaUrl: string) =
+        match Uri.TryCreate(mediaUrl, UriKind.Absolute) with
+        | true, absolute when absolute.Scheme = Uri.UriSchemeHttp || absolute.Scheme = Uri.UriSchemeHttps ->
+            absolute.ToString()
+        | _ -> Uri(Uri(proxyBase.TrimEnd('/') + "/"), mediaUrl).ToString()
+
     let private tryGetMediaViaProxyPath (path: string) (useProxy: bool) : Async<(string * bool) option> =
 
         let proxies = [
-            "https://fxig.seria.moe"
             "https://eeinstagram.com"
-            "https://instagramez.com"
+            "https://fxig.seria.moe"
         ]
 
         let rec tryProxies remaining =
@@ -310,7 +343,7 @@ module Instagram =
                     if response.IsSuccessStatusCode then
                             let! html = response.Content.ReadAsStringAsync() |> Async.AwaitTask
                             match tryGetOpenGraphMedia html with
-                            | Some media -> return Some media
+                            | Some (url, isVideo) -> return Some(resolveMediaUrl proxyBase url, isVideo)
                             | _ -> return! tryProxies rest
                         else
                             return! tryProxies rest
@@ -585,7 +618,7 @@ module Instagram =
             with
             | ex ->
                 Log.Error(ex, "Error processing Instagram URL: {Url}", url)
-                return DownloadError ex.Message
+                return DownloadError "Failed to download Instagram media. Please try again later."
         }
 
     let getInstagramReply url =
@@ -687,7 +720,9 @@ module Instagram =
                         | Choice2Of2 msg -> return Some (Reply.createMessage msg)
                     | None -> return Some (Reply.createMessage "No video to extract audio from")
                 | _ -> return Some (Reply.createMessage "Invalid Instagram URL for audio extraction")
-            with ex -> return Some (Reply.createMessage ex.Message)
+            with ex ->
+                Log.Error(ex, "Error extracting audio from Instagram URL: {Url}", url)
+                return Some (Reply.createMessage "Failed to extract Instagram audio. Please try again later.")
         }
 
 
