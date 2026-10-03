@@ -1,5 +1,6 @@
 module Telebot.TwitterData
 
+open System.Text.Json
 open System.Text.Json.Serialization
 
 // Define the data structures
@@ -122,7 +123,7 @@ type FxTweet =
         author: FxAuthor
         media: FxMedia option
         translation: FxTranslation option
-        community_note: string option
+        community_note: JsonElement option
         created_at: string option
         created_timestamp: int64
         quote: FxTweet option
@@ -136,6 +137,17 @@ type FxTweetResponse =
     }
 
 module FxConverter =
+    let private communityNoteText (note: JsonElement option) =
+        note
+        |> Option.bind (fun value ->
+            match value.ValueKind with
+            | JsonValueKind.String -> value.GetString() |> Option.ofObj
+            | JsonValueKind.Object ->
+                match value.TryGetProperty("text") with
+                | true, text when text.ValueKind = JsonValueKind.String -> text.GetString() |> Option.ofObj
+                | _ -> None
+            | _ -> None)
+
     let private mapMediaItem (item: FxMediaItem) : TwitterMediaExtended =
         let mediaType =
             match item.mediaType.ToLowerInvariant() with
@@ -175,7 +187,7 @@ module FxConverter =
         {
             allSameType = allSameType mediaList
             combinedMediaUrl = None
-            communityNote = fxTweet.community_note
+            communityNote = communityNoteText fxTweet.community_note
             conversationID = fxTweet.id
             date = defaultArg fxTweet.created_at ""
             date_epoch = fxTweet.created_timestamp

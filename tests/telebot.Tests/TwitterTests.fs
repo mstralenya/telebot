@@ -1,5 +1,6 @@
 module Telebot.Tests.TwitterTests
 
+open System.Text.Json
 open Xunit
 open Telebot.TwitterData
 open Telebot.Twitter.Twitter
@@ -57,3 +58,38 @@ let ``renderTweet original matches translated shape for same content`` () =
     let a = renderTweet "bob" "Bob" (Some "t") (Some qrt) (qrt.text)
     let b = renderTweet "bob" "Bob" (Some "t") (Some qrt) (Some "quoted text")
     Assert.Equal(b, a)
+
+[<Fact>]
+let ``FxTwitter quoted tweet accepts object-valued community note`` () =
+    let json = """{
+      "code": 200,
+      "message": "OK",
+      "tweet": {
+        "id": "main",
+        "url": "https://x.com/user/status/main",
+        "text": "main text",
+        "author": { "name": "Main", "screen_name": "main", "avatar_url": null },
+        "media": null,
+        "translation": null,
+        "community_note": null,
+        "created_at": null,
+        "created_timestamp": 1,
+        "quote": {
+          "id": "quoted",
+          "url": "https://x.com/user/status/quoted",
+          "text": "quoted text",
+          "author": { "name": "Quoted", "screen_name": "quoted", "avatar_url": null },
+          "media": null,
+          "translation": null,
+          "community_note": { "text": "Context for this post", "entities": [] },
+          "created_at": null,
+          "created_timestamp": 2,
+          "quote": null
+        }
+      }
+    }"""
+
+    let response = JsonSerializer.Deserialize<FxTweetResponse>(json)
+    let tweet = FxConverter.toTweet response.tweet
+
+    Assert.Equal(Some "Context for this post", tweet.qrt |> Option.bind _.communityNote)
