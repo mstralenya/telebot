@@ -59,6 +59,19 @@ let ``Open Graph media parser classifies image-only slides as photos`` () =
 let ``proxy media URLs resolve relative to their source`` (mediaUrl: string) (expected: string) =
     Assert.Equal(expected, resolveMediaUrl "https://eeinstagram.com" mediaUrl)
 
+[<Theory>]
+[<InlineData("video/mp4", true)>]
+[<InlineData("VIDEO/WEBM", true)>]
+[<InlineData("image/jpeg", false)>]
+let ``proxy content type identifies direct media`` (contentType: string) (isVideo: bool) =
+    Assert.Equal(Some isVideo, classifyMediaContentType (Some contentType))
+
+[<Theory>]
+[<InlineData("text/html")>]
+[<InlineData("application/octet-stream")>]
+let ``proxy content type leaves non-media responses for HTML parsing`` (contentType: string) =
+    Assert.Equal(None, classifyMediaContentType (Some contentType))
+
 [<Fact>]
 let ``modern Instagram parser preserves carousel item media types`` () =
     let json = """{

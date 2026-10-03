@@ -322,10 +322,18 @@ module Instagram =
             absolute.ToString()
         | _ -> Uri(Uri(proxyBase.TrimEnd('/') + "/"), mediaUrl).ToString()
 
+    let internal classifyMediaContentType (contentType: string option) =
+        contentType
+        |> Option.bind (fun value ->
+            if value.StartsWith("video/", StringComparison.OrdinalIgnoreCase) then Some true
+            elif value.StartsWith("image/", StringComparison.OrdinalIgnoreCase) then Some false
+            else None)
+
     let private tryGetMediaViaProxyPath (path: string) (useProxy: bool) : Async<(string * bool) option> =
 
         let proxies = [
             "https://eeinstagram.com"
+            "https://kkinstagram.com"
             "https://fxig.seria.moe"
         ]
 
@@ -341,12 +349,27 @@ module Instagram =
                     let! response = Telebot.HttpClient.executeRequestAsync request useProxy
                     use _ = response
                     if response.IsSuccessStatusCode then
+                        let contentType =
+                            response.Content.Headers.ContentType
+                            |> Option.ofObj
+                            |> Option.bind (fun header -> header.MediaType |> Option.ofObj)
+
+                        match classifyMediaContentType contentType with
+                        | Some isVideo ->
+                            let mediaUrl =
+                                response.RequestMessage
+                                |> Option.ofObj
+                                |> Option.bind (fun message -> message.RequestUri |> Option.ofObj)
+                                |> Option.map string
+                                |> Option.defaultValue $"{proxyBase}{path}"
+                            return Some(mediaUrl, isVideo)
+                        | None ->
                             let! html = response.Content.ReadAsStringAsync() |> Async.AwaitTask
                             match tryGetOpenGraphMedia html with
                             | Some (url, isVideo) -> return Some(resolveMediaUrl proxyBase url, isVideo)
                             | _ -> return! tryProxies rest
-                        else
-                            return! tryProxies rest
+                    else
+                        return! tryProxies rest
                     with ex ->
                         Log.Error(ex, $"Error requesting from proxy {proxyBase}")
                         return! tryProxies rest
