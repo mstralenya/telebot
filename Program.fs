@@ -19,7 +19,6 @@ let configureLogging () =
     Log.Logger <-
         LoggerConfiguration()
             .Enrich.FromLogContext()
-            .Enrich.WithCorrelationId()
             .Enrich.WithEnvironmentName()
             .Enrich.WithProcessId()
             .Enrich.WithThreadId()
