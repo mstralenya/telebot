@@ -16,9 +16,17 @@ open Telebot.TwitterData
 open Telebot.VideoDownloader
 
 module Twitter =
+    let internal normalizeTwitterUrl (url: string) =
+        if url.StartsWith("http://", System.StringComparison.OrdinalIgnoreCase)
+           || url.StartsWith("https://", System.StringComparison.OrdinalIgnoreCase) then
+            url
+        else
+            $"https://{url}"
+
     // Function to replace the domain in the URL and append translation language suffix if configured
     let private replaceDomain (url: string) =
         let config = Config.get ()
+        let url = normalizeTwitterUrl url
         let replaced =
             url.Replace("https://x.com/", config.TwitterApiBase)
                .Replace("https://twitter.com/", config.TwitterApiBase)
@@ -54,7 +62,10 @@ module Twitter =
         }
 
     let twitterRegex =
-        Regex(@"https://(x|twitter).com/.*/status/(\d+)", RegexOptions.Compiled)
+        Regex(
+            @"(?:https?://)?(?:www\.)?(?:x|twitter)\.com/[A-Za-z0-9_]+/status/[0-9]+(?:\?[^\s]*)?",
+            RegexOptions.Compiled ||| RegexOptions.IgnoreCase
+        )
 
     // Function to process a list of URLs and return an array of results
     let private processUrlsAsync (urls: TwitterMediaExtended list) =

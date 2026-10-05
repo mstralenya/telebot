@@ -2,6 +2,7 @@ module Telebot.Tests.RepliesTests
 
 open Xunit
 open Telebot.Replies
+open Funogram.Telegram.Types
 open Telebot.DataTypes
 
 [<Theory>]
@@ -28,6 +29,11 @@ let ``truncateWithEllipsis truncates long strings with ellipsis`` () =
     let result = truncateWithEllipsis (Some s) 20 |> Option.get
     Assert.Equal(20, result.Length)
     Assert.True(result.EndsWith("..."))
+
+[<Fact>]
+let ``reply parameters allow delivery when source message is unavailable`` () =
+    let parameters = createReplyParameters (MessageId.Create 42L) (ChatId.Int -100L)
+    Assert.Equal(Some true, parameters.AllowSendingWithoutReply)
 
 [<Fact>]
 let ``chunkGalleryMedia splits on max count of 10`` () =

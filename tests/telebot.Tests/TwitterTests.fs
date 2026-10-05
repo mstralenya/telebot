@@ -4,6 +4,7 @@ open System.Text.Json
 open Xunit
 open Telebot.TwitterData
 open Telebot.Twitter.Twitter
+open Telebot.Replies
 
 let private qrt =
     {
@@ -93,3 +94,9 @@ let ``FxTwitter quoted tweet accepts object-valued community note`` () =
     let tweet = FxConverter.toTweet response.tweet
 
     Assert.Equal(Some "Context for this post", tweet.qrt |> Option.bind _.communityNote)
+
+[<Fact>]
+let ``Twitter extractor accepts links without a scheme`` () =
+    let url = "x.com/venturetwins/status/2106788740563873837"
+    Assert.Equal<string list>([ url ], getLinks twitterRegex (Some url))
+    Assert.Equal("https://x.com/venturetwins/status/2106788740563873837", normalizeTwitterUrl url)

@@ -43,6 +43,9 @@ let getLinks (regex: Regex) (text: string option) =
     |> Option.map (fun text -> regex.Matches text |> Seq.cast<Match> |> Seq.map _.Value |> Seq.toList)
     |> Option.defaultValue List.empty
 
+let createReplyParameters (messageId: MessageId) (chatId: ChatId) =
+    ReplyParameters.Create(messageId.MessageId, chatId, allowSendingWithoutReply = true)
+
 let truncateWithEllipsis (input: string option) (maxLength: int) : string option =
     match input with
     | Some str ->
@@ -88,7 +91,7 @@ let private sendMediaWithCaption
                 chatId,
                 InputFile.File(fileToSend, File.OpenRead fileToSend),
                 parseMode = ParseMode.HTML,
-                replyParameters = ReplyParameters.Create(messageId.MessageId, chatId),
+                replyParameters = createReplyParameters messageId chatId,
                 ?caption = caption,
                 ?replyMarkup = replyMarkup
             )
@@ -115,7 +118,7 @@ let private makeSendVideoRequest (chatId: ChatId) (inputs: InputFile * string op
         chatId,
         videoFile,
         parseMode = ParseMode.HTML,
-        replyParameters = ReplyParameters.Create(messageId.MessageId, chatId),
+        replyParameters = createReplyParameters messageId chatId,
         showCaptionAboveMedia = true,
         disableNotification = true,
         supportsStreaming = true,
@@ -148,7 +151,7 @@ let private sendAudioAsync (audioPath: string) (messageId: MessageId) (chatId: C
             Req.SendAudio.Make(
                 chatId,
                 InputFile.File(audioPath, File.OpenRead audioPath),
-                replyParameters = ReplyParameters.Create(messageId.MessageId, chatId),
+                replyParameters = createReplyParameters messageId chatId,
                 disableNotification = true
             )
 
@@ -223,7 +226,7 @@ let private sendMediaGalleryAsync
                     Req.SendMessage.Make(
                         chatId,
                         msg,
-                        replyParameters = ReplyParameters.Create(messageId.MessageId, chatId),
+                        replyParameters = createReplyParameters messageId chatId,
                         parseMode = ParseMode.HTML,
                         ?replyMarkup = replyMarkup
                     )
@@ -244,7 +247,7 @@ let private sendMediaGalleryAsync
                                 chatId,
                                 InputFile.File(p, File.OpenRead p),
                                 parseMode = ParseMode.HTML,
-                                replyParameters = ReplyParameters.Create(messageId.MessageId, chatId)
+                                replyParameters = createReplyParameters messageId chatId
                             )
                         do! sendRequestAsync req ctx
                     | [ Video v ] ->
@@ -261,7 +264,7 @@ let private sendMediaGalleryAsync
                                 chatId,
                                 g,
                                 disableNotification = true,
-                                replyParameters = ReplyParameters.Create(messageId.MessageId, chatId)
+                                replyParameters = createReplyParameters messageId chatId
                             )
                         do! sendRequestAsync req ctx
                 })
@@ -330,7 +333,7 @@ let replyAsync (reply: Reply, messageId: MessageId, chatId: ChatId, ctx: UpdateC
                 Req.SendMessage.Make(
                     chatId,
                     message,
-                    replyParameters = ReplyParameters.Create(messageId.MessageId, chatId),
+                    replyParameters = createReplyParameters messageId chatId,
                     parseMode = ParseMode.HTML,
                     ?replyMarkup = markup
                 )

@@ -92,8 +92,7 @@ type ResultHandler =
                     Req.SendMessage.Make(
                         msg.OriginalMessage.ChatId,
                         "Failed to process link",
-                        replyParameters =
-                            ReplyParameters.Create(msg.OriginalMessage.MessageId.MessageId, msg.OriginalMessage.ChatId),
+                        replyParameters = createReplyParameters msg.OriginalMessage.MessageId msg.OriginalMessage.ChatId,
                         parseMode = ParseMode.HTML
                     )
 
