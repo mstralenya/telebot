@@ -329,7 +329,14 @@ module Instagram =
             elif value.StartsWith("image/", StringComparison.OrdinalIgnoreCase) then Some false
             else None)
 
-    let private tryGetMediaViaProxyPath (path: string) (useProxy: bool) : Async<(string * bool) option> =
+    let internal matchesExpectedMediaType (expectedIsVideo: bool option) (actualIsVideo: bool) =
+        expectedIsVideo |> Option.forall ((=) actualIsVideo)
+
+    let private tryGetMediaViaProxyPath
+        (path: string)
+        (expectedIsVideo: bool option)
+        (useProxy: bool)
+        : Async<(string * bool) option> =
 
         let proxies = [
             "https://eeinstagram.com"
@@ -355,7 +362,7 @@ module Instagram =
                             |> Option.bind (fun header -> header.MediaType |> Option.ofObj)
 
                         match classifyMediaContentType contentType with
-                        | Some isVideo ->
+                        | Some isVideo when matchesExpectedMediaType expectedIsVideo isVideo ->
                             let mediaUrl =
                                 response.RequestMessage
                                 |> Option.ofObj
@@ -363,10 +370,12 @@ module Instagram =
                                 |> Option.map string
                                 |> Option.defaultValue $"{proxyBase}{path}"
                             return Some(mediaUrl, isVideo)
+                        | Some _ -> return! tryProxies rest
                         | None ->
                             let! html = response.Content.ReadAsStringAsync() |> Async.AwaitTask
                             match tryGetOpenGraphMedia html with
-                            | Some (url, isVideo) -> return Some(resolveMediaUrl proxyBase url, isVideo)
+                            | Some (url, isVideo) when matchesExpectedMediaType expectedIsVideo isVideo ->
+                                return Some(resolveMediaUrl proxyBase url, isVideo)
                             | _ -> return! tryProxies rest
                     else
                         return! tryProxies rest
@@ -379,8 +388,8 @@ module Instagram =
 
     let private tryGetMediaUrlViaProxyPath (path: string) (isVideo: bool) (useProxy: bool) : Async<string option> =
         async {
-            match! tryGetMediaViaProxyPath path useProxy with
-            | Some (url, actualIsVideo) when actualIsVideo = isVideo -> return Some url
+            match! tryGetMediaViaProxyPath path (Some isVideo) useProxy with
+            | Some (url, _) -> return Some url
             | _ -> return None
         }
 
@@ -407,7 +416,7 @@ module Instagram =
                     return List.rev resolved
                 else
                     let path = $"/p/{shortcode}/?img_index={index}"
-                    match! tryGetMediaViaProxyPath path useProxy with
+                    match! tryGetMediaViaProxyPath path None useProxy with
                     | Some (url, isVideo) when not (Set.contains url seen) ->
                         return! resolveItems (index + 1) (Set.add url seen) ((url, isVideo) :: resolved)
                     | _ -> return List.rev resolved
@@ -565,7 +574,7 @@ module Instagram =
                                 | None -> return Reply.createMessage "Failed to download post"
                     | Some index ->
                         let path = $"/p/{pId}/?img_index={index}"
-                        match! tryGetMediaViaProxyPath path useProxy with
+                        match! tryGetMediaViaProxyPath path None useProxy with
                         | Some (url, isVideo) ->
                             let! media = downloadMediaAsync url isVideo useProxy
                             return Reply.createGallery [| media |] None

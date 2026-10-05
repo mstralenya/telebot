@@ -72,6 +72,24 @@ let ``proxy content type identifies direct media`` (contentType: string) (isVide
 let ``proxy content type leaves non-media responses for HTML parsing`` (contentType: string) =
     Assert.Equal(None, classifyMediaContentType (Some contentType))
 
+[<Theory>]
+[<InlineData(true, true)>]
+[<InlineData(false, false)>]
+let ``proxy fallback accepts the requested media type`` (expectedIsVideo: bool) (actualIsVideo: bool) =
+    Assert.True(matchesExpectedMediaType (Some expectedIsVideo) actualIsVideo)
+
+[<Theory>]
+[<InlineData(true, false)>]
+[<InlineData(false, true)>]
+let ``proxy fallback skips providers with the wrong media type`` (expectedIsVideo: bool) (actualIsVideo: bool) =
+    Assert.False(matchesExpectedMediaType (Some expectedIsVideo) actualIsVideo)
+
+[<Theory>]
+[<InlineData(true)>]
+[<InlineData(false)>]
+let ``untyped proxy fallback accepts photos and videos`` (actualIsVideo: bool) =
+    Assert.True(matchesExpectedMediaType None actualIsVideo)
+
 [<Fact>]
 let ``modern Instagram parser preserves carousel item media types`` () =
     let json = """{
