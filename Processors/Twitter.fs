@@ -1,6 +1,7 @@
 module Telebot.Twitter
 
 open Funogram.Telegram.Types
+open System
 open System.Linq
 open System.Threading.Tasks
 open System.Net.Http.Json
@@ -23,17 +24,24 @@ module Twitter =
         else
             $"https://{url}"
 
+    let internal buildTwitterApiUrl (apiBase: string) (translationLang: string option) (url: string) =
+        let url = normalizeTwitterUrl url
+        let apiBase = apiBase.TrimEnd('/') + "/"
+        let replaced =
+            url.Replace("https://x.com/", apiBase)
+               .Replace("https://twitter.com/", apiBase)
+
+        match translationLang with
+        | None -> replaced
+        | Some langCode ->
+            let builder = UriBuilder(replaced)
+            builder.Path <- $"{builder.Path.TrimEnd('/')}/{langCode}"
+            builder.Uri.AbsoluteUri
+
     // Function to replace the domain in the URL and append translation language suffix if configured
     let private replaceDomain (url: string) =
         let config = Config.get ()
-        let url = normalizeTwitterUrl url
-        let replaced =
-            url.Replace("https://x.com/", config.TwitterApiBase)
-               .Replace("https://twitter.com/", config.TwitterApiBase)
-
-        match config.TwitterTranslationLang with
-        | None -> replaced
-        | Some langCode -> $"{replaced.TrimEnd('/')}/{langCode}"
+        buildTwitterApiUrl config.TwitterApiBase config.TwitterTranslationLang url
 
     // Main function to process the URL and return the Tweet structure
     let private getTweetFromUrlAsync (url: string) =

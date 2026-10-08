@@ -100,3 +100,15 @@ let ``Twitter extractor accepts links without a scheme`` () =
     let url = "x.com/venturetwins/status/2106788740563873837"
     Assert.Equal<string list>([ url ], getLinks twitterRegex (Some url))
     Assert.Equal("https://x.com/venturetwins/status/2106788740563873837", normalizeTwitterUrl url)
+
+[<Fact>]
+let ``Twitter translation language is inserted before query parameters`` () =
+    let url = "https://x.com/jimbo4xl/status/2107870845532258634?s=46&t=tracking"
+    let result = buildTwitterApiUrl "https://api.fxtwitter.com/" (Some "ru") url
+    Assert.Equal("https://api.fxtwitter.com/jimbo4xl/status/2107870845532258634/ru?s=46&t=tracking", result)
+
+[<Fact>]
+let ``Twitter API URL is unchanged by translation handling when language is disabled`` () =
+    let url = "https://twitter.com/user/status/123?ref=test"
+    let result = buildTwitterApiUrl "https://api.fxtwitter.com" None url
+    Assert.Equal("https://api.fxtwitter.com/user/status/123?ref=test", result)

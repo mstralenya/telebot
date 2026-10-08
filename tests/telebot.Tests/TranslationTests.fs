@@ -54,11 +54,14 @@ let ``cleanThinkingTags strips reasoning blocks`` (input, expected) =
     Assert.Equal(expected, cleanThinkingTags input)
 
 [<Theory>]
-[<InlineData("Привет, как дела?", true)>]
-[<InlineData("The quick brown fox jumps over the lazy dog", true)>]
-[<InlineData("just ok", true)>]
-[<InlineData("Hallo, wie geht es dir heute?", false)>]
-[<InlineData("Bonjour mes amis", false)>]
-[<InlineData("12345 !@#", true)>]
-let ``isRussianOrEnglish classifies texts`` (input, expected) =
-    Assert.Equal(expected, isRussianOrEnglish input)
+[<InlineData("ru", "Привет, как дела?", true)>]
+[<InlineData("ru", "The quick brown fox jumps over the lazy dog", false)>]
+[<InlineData("ru", "mi mujer en mi entierro", false)>]
+[<InlineData("en", "The quick brown fox jumps over the lazy dog", true)>]
+[<InlineData("en", "just ok", true)>]
+[<InlineData("en", "mi mujer en mi entierro", false)>]
+[<InlineData("en", "Hallo, wie geht es dir heute?", false)>]
+[<InlineData("en", "Bonjour mes amis", false)>]
+[<InlineData("ru", "12345 !@#", true)>]
+let ``target language detection only skips text already in the requested language`` (targetLang, input, expected) =
+    Assert.Equal(expected, isLikelyTargetLanguage targetLang input)

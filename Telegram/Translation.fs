@@ -152,7 +152,7 @@ module Translation =
             else
                 cleaned
 
-    let internal isRussianOrEnglish (text: string) =
+    let internal isLikelyTargetLanguage (targetLang: string) (text: string) =
         let mutable cyrillic = 0
         let mutable latin = 0
         let mutable totalLetters = 0
@@ -164,21 +164,28 @@ module Translation =
                 if c >= '\u0400' && c <= '\u04FF' then cyrillic <- cyrillic + 1
                 elif (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') then latin <- latin + 1
         
-        if totalLetters = 0 then true
+        if totalLetters = 0 then
+            true
         else
             let cyrRatio = float cyrillic / float totalLetters
             let latRatio = float latin / float totalLetters
-            
-            if cyrRatio > 0.4 then true
-            elif latRatio > 0.7 then
-                let words = text.ToLowerInvariant().Split([|' '; '\n'; '\r'; '\t'; '.'; ','; '!'; '?'; '"'; '\''; '('; ')'; '-'; '_'|], StringSplitOptions.RemoveEmptyEntries)
-                let englishWords = set ["the"; "be"; "to"; "of"; "and"; "a"; "in"; "that"; "have"; "i"; "it"; "for"; "not"; "on"; "with"; "he"; "as"; "you"; "do"; "at"; "this"; "but"; "his"; "by"; "from"; "they"; "we"; "say"; "her"; "she"; "or"; "an"; "will"; "my"; "one"; "all"; "would"; "there"; "their"; "what"; "so"; "up"; "out"; "if"; "about"; "who"; "get"; "which"; "go"; "me"; "is"; "are"; "was"; "were"; "can"; "like"; "just"; "don't"; "im"; "i'm"; "it's"]
-                let englishCount = words |> Array.filter englishWords.Contains |> Array.length
-                
-                if words.Length > 0 then
-                    (float englishCount / float words.Length) >= 0.05 || englishCount >= 2
-                else true
-            else false
+
+            match targetLang.Trim().ToLowerInvariant() with
+            | "ru" -> cyrRatio > 0.4
+            | "en" when latRatio > 0.7 ->
+                let englishMarkers =
+                    set [
+                        "the"; "and"; "be"; "this"; "that"; "these"; "those"; "have"; "has"; "had"
+                        "it"; "its"; "for"; "not"; "with"; "you"; "your"; "he"; "she"; "we"; "they"
+                        "do"; "does"; "did"; "but"; "from"; "will"; "would"; "could"; "should"; "there"
+                        "their"; "what"; "when"; "where"; "why"; "how"; "about"; "who"; "which"; "are"
+                        "was"; "were"; "can"; "just"; "hello"; "don't"; "isn't"; "i'm"; "it's"
+                    ]
+
+                Text.RegularExpressions.Regex.Matches(text.ToLowerInvariant(), @"[\p{L}]+(?:['’][\p{L}]+)?")
+                |> Seq.cast<Text.RegularExpressions.Match>
+                |> Seq.exists (fun m -> englishMarkers.Contains m.Value)
+            | _ -> false
 
     let private chatMessages systemPrompt text =
         [|
@@ -217,7 +224,7 @@ module Translation =
 
     let translateTextAsync (text: string) (targetLang: string) : Async<TwitterTranslation option> =
         async {
-            if isRussianOrEnglish text then return None
+            if isLikelyTargetLanguage targetLang text then return None
             else
             match getLlmApiUrl() with
             | None -> return None
