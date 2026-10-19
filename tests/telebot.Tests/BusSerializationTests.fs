@@ -73,12 +73,3 @@ let ``Concrete link messages survive a bus serialization round trip`` () =
 
     Assert.Equal("https://www.instagram.com/p/xyz/", deserialized.Url)
     Assert.Equal(updateMessage, deserialized.OriginalMessage)
-
-[<Fact>]
-let ``rich reply preserves HTML markup and gallery fallback across bus serialization`` () =
-    let keyboard = Markup.InlineKeyboardMarkup(InlineKeyboardMarkup.Create([| [| InlineKeyboardButton.Create("Original", callbackData = "show_orig:1") |] |]))
-    let fallback = Reply.Gallery { Media = [Video "clip.mp4"]; Caption = Some "text"; ReplyMarkup = Some keyboard }
-    let original = Reply.RichMessage("<tg-collage><video src=\"https://cdn.example/clip.mp4\"/></tg-collage>", Some keyboard, fallback)
-    let options = busOptions ()
-    let json = JsonSerializer.Serialize(original, options)
-    Assert.Equal(original, JsonSerializer.Deserialize<Reply>(json, options))

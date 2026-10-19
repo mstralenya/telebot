@@ -134,16 +134,7 @@ let private handleCallbackQueryAsync (ctx: UpdateContext) (cb: CallbackQuery) : 
                     match cb.Message with
                     | Some (MaybeInaccessibleMessage.Message msg) ->
                         let chatId = ChatId.Int msg.Chat.Id
-                        if msg.RichMessage.IsSome then
-                            let editReq =
-                                Req.EditMessageText.Make(
-                                    chatId = chatId,
-                                    messageId = msg.MessageId,
-                                    richMessage = InputRichMessage.Create(html = newText),
-                                    replyMarkup = keyboard
-                                )
-                            do! editReq |> api ctx.Config |> Async.Ignore
-                        elif msg.Text.IsSome then
+                        if msg.Text.IsSome then
                             let editReq =
                                 Req.EditMessageText.Make(
                                     chatId = chatId,
