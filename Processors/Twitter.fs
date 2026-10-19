@@ -2,6 +2,7 @@ module Telebot.Twitter
 
 open Funogram.Telegram.Types
 open System
+open System.Net
 open System.Linq
 open System.Threading.Tasks
 open System.Net.Http.Json
@@ -93,13 +94,32 @@ module Twitter =
 
     // Formats a tweet (and optionally its quoted tweet) into the HTML message body
     let internal renderTweet (screenName: string) (userName: string) (body: string option) (qrt: TwitterQrt option) (qrtBody: string option) : string =
-        match body with
-        | Some t ->
-            match qrt, qrtBody with
-            | Some q, Some qtxt ->
-                $"""<b>{userName}</b> <i>(@​{screenName})</i>:<blockquote>{t}</blockquote>Quoting <b>{q.user_name}</b><i>(@​{q.user_screen_name})</i>:<blockquote>{qtxt}</blockquote>"""
-            | _ -> $"<b>{userName}</b> <i>(@​{screenName})</i>: <blockquote>{t}</blockquote>"
-        | None -> $"<b>{userName}</b> <i>(@​{screenName})</i>:"
+        let main = $"<b>{WebUtility.HtmlEncode userName}</b> <i>(@​{WebUtility.HtmlEncode screenName})</i>:"
+        let main = main + (body |> Option.map (fun text -> $" <blockquote>{text}</blockquote>") |> Option.defaultValue "")
+        match qrt with
+        | Some q ->
+            let quoted = qrtBody |> Option.map (fun text -> $"<blockquote>{text}</blockquote>") |> Option.defaultValue ""
+            main + $"Quoting <b>{WebUtility.HtmlEncode q.user_name}</b><i>(@​{WebUtility.HtmlEncode q.user_screen_name})</i>:" + quoted
+        | None -> main
+
+    let internal renderMedia (media: TwitterMediaExtended list) =
+        let items =
+            media
+            |> List.choose (fun item ->
+                match Uri.TryCreate(item.url, UriKind.Absolute) with
+                | true, uri when uri.Scheme = "https" || uri.Scheme = "http" ->
+                    let tag = if item.mediaType = TwitterMedia.Video then "video" else "img"
+                    Some $"<{tag} src=\"{WebUtility.HtmlEncode item.url}\"/>"
+                | _ -> None)
+            |> String.concat ""
+        if items = "" then "" else $"<tg-collage>{items}</tg-collage>"
+
+    let internal renderRichTweet (tweet: Tweet) body quotedBody =
+        let main = renderTweet tweet.user_screen_name tweet.user_name body None None + renderMedia tweet.media_extended
+        match tweet.qrt with
+        | Some quote ->
+            main + "Quoting " + renderTweet quote.user_screen_name quote.user_name quotedBody None None + renderMedia quote.media_extended
+        | None -> main
 
     let getTwitterReplyAsync (chatId: ChatId) (url: string) =
         async {
@@ -150,8 +170,8 @@ module Twitter =
                         | Some tl when not (System.String.IsNullOrWhiteSpace(tl.text)) ->
                             let direction = $"{tl.source_language.ToUpper()}→{tl.destination_language.ToUpper()}"
                             Log.Information("Successfully retrieved translation for tweet {TweetId} ({Direction})", tweet.tweetID, direction)
-                            Some $"<i>【TL {direction}】</i>\n{tl.text}"
-                        | _ -> tweet.text
+                            Some $"<i>【TL {WebUtility.HtmlEncode direction}】</i>\n{WebUtility.HtmlEncode tl.text}"
+                        | _ -> tweet.text |> Option.map WebUtility.HtmlEncode
 
                     let qrtTextToUse =
                         match tweet.qrt with
@@ -160,8 +180,8 @@ module Twitter =
                             | Some tl when not (System.String.IsNullOrWhiteSpace(tl.text)) ->
                                 let direction = $"{tl.source_language.ToUpper()}→{tl.destination_language.ToUpper()}"
                                 Log.Information("Successfully retrieved translation for quoted tweet {TweetId} ({Direction})", qrt.tweetID, direction)
-                                Some $"<i>【TL {direction}】</i>\n{tl.text}"
-                            | _ -> qrt.text
+                                Some $"<i>【TL {WebUtility.HtmlEncode direction}】</i>\n{WebUtility.HtmlEncode tl.text}"
+                            | _ -> qrt.text |> Option.map WebUtility.HtmlEncode
                         | None -> None
 
                     let replyText =
@@ -177,37 +197,39 @@ module Twitter =
                         | i when i > 0 -> Reply.createGallery (List.toArray gallery) replyText
                         | _ -> Reply.createMessage replyText.Value
 
+                    let richText = renderRichTweet tweet textToUse qrtTextToUse
+
                     // Check if translation was actually applied to add a "Show Original Text" button
                     let hasTranslation =
                         (tweet.translation |> Option.bind (fun tl -> if System.String.IsNullOrWhiteSpace(tl.text) then None else Some tl) |> Option.isSome) ||
                         (tweet.qrt |> Option.bind (fun q -> q.translation |> Option.bind (fun tl -> if System.String.IsNullOrWhiteSpace(tl.text) then None else Some tl)) |> Option.isSome)
 
-                    if hasTranslation && replyText.IsSome then
-                        let originalText =
-                            renderTweet tweet.user_screen_name tweet.user_name tweet.text tweet.qrt (tweet.qrt |> Option.bind _.text)
-
+                    let addTranslationMarkup reply original translated =
+                        if not hasTranslation then reply
+                        else
+                        let cacheId = Translation.saveTranslationToCache original translated
+                        let btnToggle = InlineKeyboardButton.Create("Show Original Text", callbackData = $"show_orig:{cacheId}")
                         let isGroupChat =
                             match chatId with
                             | ChatId.Int id -> id < 0L
                             | ChatId.String s -> s.StartsWith("-")
-
-                        let cacheId = Translation.saveTranslationToCache originalText replyText.Value
-                        let btnToggle = InlineKeyboardButton.Create("Show Original Text", callbackData = $"show_orig:{cacheId}")
-
                         let buttons =
                             match Config.get().WebAppBaseUrl with
                             | Some webAppBase when not isGroupChat ->
                                 let url = $"{webAppBase.TrimEnd('/')}/webapp?id={cacheId}"
                                 let btnWebApp = InlineKeyboardButton.Create("Original (Web)", webApp = WebAppInfo.Create(url))
                                 [| [| btnWebApp; btnToggle |] |]
-                            | _ ->
-                                [| [| btnToggle |] |]
-
+                            | _ -> [| [| btnToggle |] |]
                         let keyboard = InlineKeyboardMarkup.Create(buttons)
-                        let replyMarkup = Markup.InlineKeyboardMarkup keyboard
-                        return Some (baseReply |> Reply.withMarkup replyMarkup)
-                    else
-                        return Some baseReply
+                        reply |> Reply.withMarkup (Markup.InlineKeyboardMarkup keyboard)
+
+                    let originalBody = tweet.text |> Option.map WebUtility.HtmlEncode
+                    let originalQuoteBody = tweet.qrt |> Option.bind _.text |> Option.map WebUtility.HtmlEncode
+                    let originalText = renderTweet tweet.user_screen_name tweet.user_name originalBody tweet.qrt originalQuoteBody
+                    let fallback = addTranslationMarkup baseReply originalText replyText.Value
+                    let richReply = Telebot.DataTypes.Reply.RichMessage(richText, None, fallback)
+                    return Some(addTranslationMarkup richReply (renderRichTweet tweet originalBody originalQuoteBody) richText)
+
             with ex ->
                 Log.Error(ex, "Error processing Twitter link")
                 twitterFailureCounter.Inc()

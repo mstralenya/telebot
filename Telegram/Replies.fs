@@ -37,6 +37,7 @@ module Reply =
         | Gallery g -> Gallery { g with ReplyMarkup = Some markup }
         | Message (txt, _) -> Message (txt, Some markup)
         | AudioFile af -> AudioFile af
+        | RichMessage (html, _, fallback) -> RichMessage (html, Some markup, fallback)
 
 let getLinks (regex: Regex) (text: string option) =
     text
@@ -290,9 +291,34 @@ let private sendMediaGalleryAsync
     }
 
 /// Sends a reply back to the chat that produced the original message.
-let replyAsync (reply: Reply, messageId: MessageId, chatId: ChatId, ctx: UpdateContext) : Async<unit> =
+let rec replyAsync (reply: Reply, messageId: MessageId, chatId: ChatId, ctx: UpdateContext) : Async<unit> =
     async {
         match reply with
+        | RichMessage (html, markup, fallback) ->
+            let req =
+                Req.SendRichMessage.Make(
+                    chatId,
+                    InputRichMessage.Create(html = html),
+                    replyParameters = createReplyParameters messageId chatId,
+                    ?replyMarkup = markup
+                )
+            let! result = req |> api ctx.Config
+            match result with
+            | Ok _ ->
+                // The prepared gallery is only needed if Telegram rejects the rich message.
+                match fallback with
+                | Gallery gallery ->
+                    for media in gallery.Media do
+                        match media with
+                        | Photo path -> do! deleteFileAsync path
+                        | Video path ->
+                            do! deleteFileAsync path
+                            do! deleteFileAsync (getThumbnailName path)
+                | _ -> ()
+            | Error error ->
+                Log.Warning("Rich message rejected ({Code}): {Description}. Sending regular reply.", error.ErrorCode, error.Description)
+                do! replyAsync (fallback, messageId, chatId, ctx)
+
         | VideoFile videoFile ->
             let! videoPath = shrinkVideoIfNeededAsync videoFile.File
             let fileInfo = FileInfo videoPath

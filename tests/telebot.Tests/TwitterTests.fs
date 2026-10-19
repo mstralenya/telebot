@@ -41,9 +41,9 @@ let ``renderTweet formats tweet with quote`` () =
     Assert.Contains("<blockquote>qtext</blockquote>", result)
 
 [<Fact>]
-let ``renderTweet without quote body falls back to plain blockquote`` () =
+let ``renderTweet preserves attribution for a media-only quote`` () =
     let result = renderTweet "alice" "Alice" (Some "main") (Some qrt) None
-    Assert.DoesNotContain("Quoting", result)
+    Assert.Contains("Quoting <b>Quoted User</b>", result)
     Assert.Contains("<blockquote>main</blockquote>", result)
 
 [<Fact>]
@@ -112,3 +112,25 @@ let ``Twitter API URL is unchanged by translation handling when language is disa
     let url = "https://twitter.com/user/status/123?ref=test"
     let result = buildTwitterApiUrl "https://api.fxtwitter.com" None url
     Assert.Equal("https://api.fxtwitter.com/user/status/123?ref=test", result)
+
+let private media kind url : TwitterMediaExtended =
+    { altText = None; size = { width = 640; height = 480 }; thumbnail_url = ""; mediaType = kind; url = url }
+
+[<Fact>]
+let ``rich tweet keeps main and quoted media in separate collages`` () =
+    let tweet : Tweet =
+        { date_epoch = 0L; mediaURLs = []; media_extended = [media TwitterMedia.Image "https://cdn.example/main.jpg"]
+          qrt = Some { qrt with media_extended = [media TwitterMedia.Video "https://cdn.example/quote.mp4"] }
+          qrtURL = ""; text = None; tweetID = "1"; tweetURL = ""; user_name = "A < B & C"
+          user_profile_image_url = ""; user_screen_name = "alice"; translation = None }
+    let html = renderRichTweet tweet None (Some "quoted text")
+    Assert.Contains("A &lt; B &amp; C", html)
+    Assert.Contains("<blockquote>quoted text</blockquote>", html)
+    Assert.Contains("<tg-collage><img src=\"https://cdn.example/main.jpg\"/></tg-collage>Quoting", html)
+    Assert.EndsWith("<tg-collage><video src=\"https://cdn.example/quote.mp4\"/></tg-collage>", html)
+
+[<Fact>]
+let ``rich media escapes URL attributes and rejects non-http sources`` () =
+    let html = renderMedia [media TwitterMedia.Image "https://cdn.example/a.jpg?a=1&b=2"; media TwitterMedia.Image "javascript:alert(1)"]
+    Assert.Contains("a=1&amp;b=2", html)
+    Assert.DoesNotContain("javascript:", html)
