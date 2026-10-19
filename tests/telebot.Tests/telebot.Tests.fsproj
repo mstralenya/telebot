@@ -22,9 +22,9 @@
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="xunit.v3.mtp-v2" Version="4.0.1" />
+    <PackageReference Include="xunit.v3.mtp-v2" Version="4.0.2" />
     <PackageReference Include="FSharp.SystemTextJson" Version="1.4.36" />
-    <PackageReference Update="FSharp.Core" Version="10.1.401" />
+    <PackageReference Update="FSharp.Core" Version="10.1.402" />
   </ItemGroup>
 
   <ItemGroup>
