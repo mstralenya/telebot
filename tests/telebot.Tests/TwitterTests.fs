@@ -41,9 +41,9 @@ let ``renderTweet formats tweet with quote`` () =
     Assert.Contains("<blockquote>qtext</blockquote>", result)
 
 [<Fact>]
-let ``renderTweet without quote body falls back to plain blockquote`` () =
+let ``renderTweet preserves attribution for a media-only quote`` () =
     let result = renderTweet "alice" "Alice" (Some "main") (Some qrt) None
-    Assert.DoesNotContain("Quoting", result)
+    Assert.Contains("Quoting <b>Quoted User</b>", result)
     Assert.Contains("<blockquote>main</blockquote>", result)
 
 [<Fact>]
@@ -112,3 +112,46 @@ let ``Twitter API URL is unchanged by translation handling when language is disa
     let url = "https://twitter.com/user/status/123?ref=test"
     let result = buildTwitterApiUrl "https://api.fxtwitter.com" None url
     Assert.Equal("https://api.fxtwitter.com/user/status/123?ref=test", result)
+
+let private media kind url : TwitterMediaExtended =
+    { altText = None; size = { width = 640; height = 480 }; thumbnail_url = ""; mediaType = kind; url = url }
+
+[<Fact>]
+let ``rich tweet with single main and quoted photos uses standalone blocks`` () =
+    let tweet : Tweet =
+        { date_epoch = 0L; mediaURLs = []; media_extended = [media TwitterMedia.Image "https://cdn.example/main.jpg"]
+          qrt = Some { qrt with media_extended = [{ media TwitterMedia.Image "https://cdn.example/quote.jpg" with size = {width = 1770; height = 883} }] }
+          qrtURL = ""; text = None; tweetID = "1"; tweetURL = ""; user_name = "A < B & C"
+          user_profile_image_url = ""; user_screen_name = "alice"; translation = None }
+    let html = renderRichTweet tweet None (Some "quoted text")
+    Assert.Contains("A &lt; B &amp; C", html)
+    Assert.Contains("<blockquote>quoted text</blockquote>", html)
+    Assert.Contains("<img src=\"https://cdn.example/main.jpg\"/>Quoting", html)
+    Assert.EndsWith("<img src=\"https://cdn.example/quote.jpg\"/>", html)
+    Assert.DoesNotContain("tg-collage", html)
+
+[<Fact>]
+let ``rich media keeps mixed photos and video together in a multi-item collage`` () =
+    let html = renderMedia [media TwitterMedia.Image "https://cdn.example/photo.jpg"; media TwitterMedia.Video "https://cdn.example/video.mp4"]
+    Assert.Equal("<tg-collage><img src=\"https://cdn.example/photo.jpg\"/><video src=\"https://cdn.example/video.mp4\"/></tg-collage>", html)
+
+[<Fact>]
+let ``rich media uses a standalone video for one item`` () =
+    let html = renderMedia [media TwitterMedia.Video "https://cdn.example/video.mp4"]
+    Assert.Equal("<video src=\"https://cdn.example/video.mp4\"/>", html)
+
+[<Fact>]
+let ``filtering an invalid source cannot leave a single-item collage`` () =
+    let html = renderMedia [media TwitterMedia.Image "https://cdn.example/photo.jpg"; media TwitterMedia.Image "javascript:alert(1)"]
+    Assert.Equal("<img src=\"https://cdn.example/photo.jpg\"/>", html)
+
+[<Fact>]
+let ``empty rich media does not emit an empty collage`` () =
+    Assert.Equal("", renderMedia [])
+    Assert.Equal("", renderMedia [media TwitterMedia.Image "javascript:alert(1)"])
+
+[<Fact>]
+let ``rich media escapes URL attributes and rejects non-http sources`` () =
+    let html = renderMedia [media TwitterMedia.Image "https://cdn.example/a.jpg?a=1&b=2"; media TwitterMedia.Image "javascript:alert(1)"]
+    Assert.Contains("a=1&amp;b=2", html)
+    Assert.DoesNotContain("javascript:", html)

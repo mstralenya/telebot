@@ -53,6 +53,7 @@ type AppConfig = {
     UseProxyForYoutube: bool
     TwitterApiBase: string
     TwitterTranslationLang: string option
+    TwitterRichMessagesEnabled: bool
     LlmTranslationEnabled: bool
     LlmApiUrl: string option
     LlmApiType: string option
@@ -147,6 +148,7 @@ let private load () : AppConfig =
         UseProxyForYoutube = flag "USE_PROXY_FOR_YOUTUBE"
         TwitterApiBase = twitterApiBase
         TwitterTranslationLang = trimmed "TWITTER_TRANSLATION_LANG"
+        TwitterRichMessagesEnabled = flag "TWITTER_RICH_MESSAGES_ENABLED"
         LlmTranslationEnabled = flag "LLM_TRANSLATION_ENABLED"
         LlmApiUrl = trimmed "LLM_API_URL"
         LlmApiType = trimmed "LLM_API_TYPE" |> Option.map _.ToLowerInvariant()

@@ -27,6 +27,7 @@ type Reply =
     | Gallery of Gallery
     | Message of string * Markup option
     | AudioFile of string
+    | RichMessage of html: string * markup: Markup option * fallback: Reply
 
 type DownloadResult =
     | Success of Reply
